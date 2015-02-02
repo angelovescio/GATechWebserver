@@ -1,5 +1,18 @@
 #include <stdlib.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
 #include "optlist/optlist.h"
+
+#define SOCKET_ERROR -1
+#define QUEUE_SIZE 1000
+#define BUFFER_SIZE 1024
+
+int queue[QUEUE_SIZE];
+pthread_cond_t *cond;
+pthread_cond_t *cond2;
+
+typedef void (*worker)(void *threadarg);
+
 int main(int argc, char *argv[])
 {
 	option_t *optList, *thisOpt;
@@ -60,28 +73,17 @@ int main(int argc, char *argv[])
 
 	return EXIT_SUCCESS;
 }
-int boss(int argc, char* argv[])
+int boss(int cThreads,int hPort)
 {
-int hSocket, hServerSocket;  /* handle to socket */
-struct hostent* pHostInfo;   /* holds info about a machine */
-struct sockaddr_in Address; /* Internet socket address stuct */
+	int hSocket, hServerSocket;  /* handle to socket */
+	struct hostent* pHostInfo;   /* holds info about a machine */
+	struct sockaddr_in Address; /* Internet socket address stuct */
 	int nAddressSize = sizeof(struct sockaddr_in);
 	int nHostPort;
 	int numThreads;
 	int i;
 
 	init(&head,&tail);
-
-//**********************************************
-//ALL OF THIS JUST SETS UP SERVER (ADDR STRUCT,PORT,HOST INFO, ETC)
-	if(argc < 3) {
-		printf("\nserver-usage port-num num-thread\n");
-		return 0;
-	}
-	else {
-		nHostPort=atoi(argv[1]);
-		numThreads=atoi(argv[2]);
-	}
 
 	printf("\nStarting server");
 
@@ -97,10 +99,10 @@ struct sockaddr_in Address; /* Internet socket address stuct */
 
 /* fill address struct */
 	Address.sin_addr.s_addr = INADDR_ANY;
-	Address.sin_port = htons(nHostPort);
+	Address.sin_port = htons(hPort);
 	Address.sin_family = AF_INET;
 
-	printf("\nBinding to port %d\n",nHostPort);
+	printf("\nBinding to port %d\n",hPort);
 
 /* bind to a port */
 	if(bind(hServerSocket,(struct sockaddr*)&Address,sizeof(Address)) == SOCKET_ERROR) {
@@ -124,9 +126,9 @@ struct sockaddr_in Address; /* Internet socket address stuct */
 //**********************************************
 
 //instantiate all threads
-	pthread_t tid[numThreads];
+	pthread_t tid[cThreads];
 
-	for(i = 0; i < numThreads; i++) {
+	for(i = 0; i < cThreads; i++) {
 		pthread_create(&tid[i],NULL,worker,NULL);
 	}
 
@@ -157,7 +159,7 @@ struct sockaddr_in Address; /* Internet socket address stuct */
     	pthread_cond_signal(&cond);     // wake worker thread
 	}
 }
-void *worker(void *threadarg) {
+void *worker_base(void *threadarg) {
 
 	pthread_mutex_lock(&mtx);
 

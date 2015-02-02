@@ -1,4 +1,4 @@
-CFLAGS := -Wall --std=gnu99 -ggdb
+CFLAGS := -w --std=gnu99 -ggdb
 
 ARCH := $(shell uname)
 ifneq ($(ARCH),Darwin)
