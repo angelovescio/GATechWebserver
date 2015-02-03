@@ -6,7 +6,7 @@ ifneq ($(ARCH),Darwin)
 endif
 
 #default: webserver webclient
-SOURCECLIENT=webclient.c
+SOURCECLIENT=optlist/optlist.c webclient.c
 SOURCESERVER=optlist/optlist.c webserver.c 
 OBJECTCLIENT=$(SOURCECLIENT:.c=.o)
 OBJECTSERVER=$(SOURCESERVER:.c=.o)
@@ -26,6 +26,6 @@ clean:
 	rm -fr optlist\*.o *.o webserver webclient
 
 webserver: $(OBJECTSERVER) 
-	$(CC) $(OBJECTSERVER) -o $@
+	$(CC) $(OBJECTSERVER) -lpthread -o $@
 webclient: $(OBJECTCLIENT) 
-	$(CC) $(OBJECTCLIENT) -o $@
+	$(CC) $(OBJECTCLIENT) -lpthread -o $@

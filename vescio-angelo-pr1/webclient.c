@@ -1,6 +1,7 @@
 #include <stdlib.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include "llist.h"
 #include "optlist/optlist.h"
 
 #define SOCKET_ERROR -1
@@ -8,10 +9,11 @@
 #define BUFFER_SIZE 1024
 
 int queue[QUEUE_SIZE];
+pthread_mutex_t mtx;
 pthread_cond_t *cond;
 pthread_cond_t *cond2;
 
-typedef void (*worker)(void *threadarg);
+void worker(void *threadarg);
 
 int main(int argc, char *argv[])
 {
@@ -81,9 +83,11 @@ int boss(int cThreads,int hPort)
 	int nAddressSize = sizeof(struct sockaddr_in);
 	int nHostPort;
 	int numThreads;
+
 	int i;
 
-	init(&head,&tail);
+	//init(&head,&tail);
+	init();
 
 	printf("\nStarting server");
 
@@ -129,7 +133,7 @@ int boss(int cThreads,int hPort)
 	pthread_t tid[cThreads];
 
 	for(i = 0; i < cThreads; i++) {
-		pthread_create(&tid[i],NULL,worker,NULL);
+		pthread_create(&tid[i],NULL,&worker,NULL);
 	}
 
 	printf("\nMaking a listen queue of %d elements",QUEUE_SIZE);
@@ -144,7 +148,7 @@ int boss(int cThreads,int hPort)
 		pthread_mutex_lock(&mtx);
 		printf("\nWaiting for a connection");
 
-		while(!empty(head,tail)) {
+		while(!empty()) {
 			pthread_cond_wait (&cond2, &mtx);
 		}
 
@@ -153,21 +157,21 @@ int boss(int cThreads,int hPort)
 
 		printf("\nGot a connection");
 
-		enqueue(queue,&tail,hSocket);
+		enqueue(hSocket);
 
 		pthread_mutex_unlock(&mtx);
     	pthread_cond_signal(&cond);     // wake worker thread
 	}
 }
-void *worker_base(void *threadarg) {
+void worker(void *threadarg) {
 
 	pthread_mutex_lock(&mtx);
-
+	int totalBytesSent = 0;
 	while(empty(head,tail)) {
 		pthread_cond_wait(&cond, &mtx);
 	}
-	int hSocket = dequeue(queue,&head);
-
+	int hSocket = dequeue((struct node*)threadarg);
+	char allText[BUFFER_SIZE];
 	unsigned nSendAmount, nRecvAmount;
 	char line[BUFFER_SIZE];
 
