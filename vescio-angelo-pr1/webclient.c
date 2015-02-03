@@ -21,7 +21,7 @@ int main(int argc, char *argv[])
 
     /* get list of command line options and their arguments */
 	optList = NULL;
-	optList = GetOptList(argc, argv, "a:bcd:ef?");
+	optList = GetOptList(argc, argv, "s:ptw:drmh");
 
     /* display results of parsing */
 	while (optList != NULL)
@@ -29,30 +29,31 @@ int main(int argc, char *argv[])
 		thisOpt = optList;
 		optList = optList->next;
 
-		if ('?' == thisOpt->option)
+		if ('h' == thisOpt->option)
 		{
         	/*
 			usage:
 			webclient [options]
 			options:
-			-s server address (Default: 0.0.0.0)
-			-p server port (Default: 8888)
-			-t number of worker threads (Default: 1, Range: 1-100)
-			-w path to workload file (Default: workload.txt)
-			-d path to downloaded file directory (Default: null)
-			-r number of total requests (Default: 10, Range: 1-1000)
-			-m path to metrics file (Default: metrics.txt)
-			-h show help message
+			printf("  -s : server address (Default: 0.0.0.0)\n");
+			printf("  -p : server port (Default: 8888)\n");
+			printf("  -t : number of worker threads (Default: 1, Range: 1-100)\n");
+			printf("  -w : path to workload file (Default: workload.txt)\n");
+			printf("  -d : path to downloaded file directory (Default: null)\n");
+			printf("  -r : number of total requests (Default: 10, Range: 1-1000)\n");
+			printf("  -m : path to metrics file (Default: metrics.txt)\n");
+			printf("  -h : show help message\n");
         	*/
 			printf("Usage: %s <options>\n\n", FindFileName(argv[0]));
 			printf("options:\n");
-			printf("  -a : option excepting argument.\n");
-			printf("  -b : option without arguments.\n");
-			printf("  -c : option without arguments.\n");
-			printf("  -d : option excepting argument.\n");
-			printf("  -e : option without arguments.\n");
-			printf("  -f : option without arguments.\n");
-			printf("  -? : print out command line options.\n\n");
+			printf("  -s : server address (Default: 0.0.0.0)\n");
+			printf("  -p : server port (Default: 8888)\n");
+			printf("  -t : number of worker threads (Default: 1, Range: 1-100)\n");
+			printf("  -w : path to workload file (Default: workload.txt)\n");
+			printf("  -d : path to downloaded file directory (Default: null)\n");
+			printf("  -r : number of total requests (Default: 10, Range: 1-1000)\n");
+			printf("  -m : path to metrics file (Default: metrics.txt)\n");
+			printf("  -h : show help message\n");
 
             FreeOptList(thisOpt);   /* free the rest of the list */
 			return EXIT_SUCCESS;
@@ -75,14 +76,15 @@ int main(int argc, char *argv[])
 
 	return EXIT_SUCCESS;
 }
-int boss(int cThreads,int hPort)
+int boss(int cThreads,int hPort,char* chIpAddress)
 {
+	char* chIp = "0.0.0.0";
 	int hSocket, hServerSocket;  /* handle to socket */
 	struct hostent* pHostInfo;   /* holds info about a machine */
 	struct sockaddr_in Address; /* Internet socket address stuct */
 	int nAddressSize = sizeof(struct sockaddr_in);
-	int nHostPort;
-	int numThreads;
+	int nHostPort = 8888;
+	int numThreads = 1;
 
 	int i;
 

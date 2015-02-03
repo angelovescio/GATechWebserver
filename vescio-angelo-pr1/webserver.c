@@ -15,14 +15,18 @@ pthread_cond_t *cond;
 pthread_cond_t *cond2;
 
 void worker(void *threadarg);
+int getFileForBuffer(char* path,char* filename, uint8_t * ppBuffer, int * cbBuffer);
 
 int main(int argc, char *argv[])
 {
+	int nHostPort = 8888;
+	int numThreads = 1;
+	char* filePath = ".";
 	option_t *optList, *thisOpt;
 
     /* get list of command line options and their arguments */
 	optList = NULL;
-	optList = GetOptList(argc, argv, "a:bcd:ef?");
+	optList = GetOptList(argc, argv, "p:t:fh");
 
     /* display results of parsing */
 	while (optList != NULL)
@@ -30,43 +34,48 @@ int main(int argc, char *argv[])
 		thisOpt = optList;
 		optList = optList->next;
 
-		if ('?' == thisOpt->option)
+		if ('h' == thisOpt->option)
 		{
         	/*
 			usage:
 			webserver [options]
 			options:
-			-p port (Default: 8888)
-			-t number of worker threads (Default: 1, Range: 1-1000)
-			-f path to static files (Default: .)
-			-h show help message
+			printf("  -p : port (Default: 8888)\n");
+			printf("  -t : number of worker threads (Default: 1, Range: 1-1000)\n");
+			printf("  -f : path to static files (Default: .)\n");
+			printf("  -h : show help message\n");
         	*/
 			printf("Usage: %s <options>\n\n", FindFileName(argv[0]));
 			printf("options:\n");
-			printf("  -a : option excepting argument.\n");
-			printf("  -b : option without arguments.\n");
-			printf("  -c : option without arguments.\n");
-			printf("  -d : option excepting argument.\n");
-			printf("  -e : option without arguments.\n");
-			printf("  -f : option without arguments.\n");
-			printf("  -? : print out command line options.\n\n");
+			printf("  -p : port (Default: 8888)\n");
+			printf("  -t : number of worker threads (Default: 1, Range: 1-1000)\n");
+			printf("  -f : path to static files (Default: .)\n");
+			printf("  -h : show help message\n");
 
             FreeOptList(thisOpt);   /* free the rest of the list */
 			return EXIT_SUCCESS;
 		}
-
-		printf("found option %c\n", thisOpt->option);
-
-		if (thisOpt->argument != NULL)
+		else if('p' == thisOpt->option)
 		{
-			printf("\tfound argument %s", thisOpt->argument);
-			printf(" at index %d\n", thisOpt->argIndex);
+			if (thisOpt->argument != NULL)
+			{
+				nHostPort = atoi(thisOpt->argument);
+			}
 		}
-		else
+		else if('t' == thisOpt->option)
 		{
-			printf("\tno argument for this option\n");
+			if (thisOpt->argument != NULL)
+			{
+				numThreads = atoi(thisOpt->argument);
+			}
 		}
-
+		else if('f' == thisOpt->option)
+		{
+			if (thisOpt->argument != NULL)
+			{
+				filePath = thisOpt->argument;
+			}
+		}
         free(thisOpt);    /* done with this item, free it */
 	}
 
@@ -78,8 +87,8 @@ int boss(int cThreads,int hPort)
 	struct hostent* pHostInfo;   /* holds info about a machine */
 	struct sockaddr_in Address; /* Internet socket address stuct */
 	int nAddressSize = sizeof(struct sockaddr_in);
-	int nHostPort;
-	int numThreads;
+	int nHostPort = 8888;
+	int numThreads = 1;
 	int i;
 
 	//init(&head,&tail);
@@ -122,10 +131,7 @@ int boss(int cThreads,int hPort)
 		, Address.sin_addr.s_addr
 		, ntohs(Address.sin_port)
 		);
-//Up to this point is boring server set up stuff. I need help below this.
-//**********************************************
 
-//instantiate all threads
 	pthread_t tid[cThreads];
 
 	for(i = 0; i < cThreads; i++) {
@@ -157,7 +163,7 @@ int boss(int cThreads,int hPort)
 
 		pthread_mutex_unlock(&mtx);
     	pthread_cond_signal(&cond);     // wake worker thread
-	}
+    }
 }
 void worker(void *threadarg) {
 
@@ -167,19 +173,20 @@ void worker(void *threadarg) {
 	while(empty(head,tail)) {
 		pthread_cond_wait(&cond, &mtx);
 	}
-	int hSocket = dequeue((struct node*)threadarg);
-
+	struct node* ptr = (struct node*)threadarg;
+	int hSocket = dequeue(ptr);
+	uint8_t * buffer = NULL;
+	int cbBuffer = 0;
+	getFileForBuffer(ptr->path,ptr->filename,&buffer,&cbBuffer);
+	if(cbBuffer <=0)
+	{
+		return EXIT_FAILURE;
+	}
 	unsigned nSendAmount, nRecvAmount;
 	char line[BUFFER_SIZE];
 
-	nRecvAmount = read(hSocket,line,sizeof line);
+	nRecvAmount = read(hSocket,line,sizeof(line));
 	printf("\nReceived %s from client\n",line);
-
-
-//***********************************************
-//DO ALL HTTP PARSING (Removed for the sake of space; I can add it back if needed)
-//*********************************************** 
-
 
 	nSendAmount = write(hSocket,allText,sizeof(allText));
 
@@ -198,4 +205,49 @@ void worker(void *threadarg) {
 
 	pthread_mutex_unlock(&mtx);
 	pthread_cond_signal(&cond2);
+}
+//read the workload file and return a buffer containing the file
+int getFileForBuffer(char* path,char* filename, uint8_t * ppBuffer, int * cbBuffer){
+	char fullpath[1024];
+	memset(fullpath,0,1024);
+	if(strnlen(path,512) >=512)
+	{
+		return EXIT_FAILURE;
+	}
+	if(strnlen(filename,512) >=512)
+	{
+		return EXIT_FAILURE;
+	}
+	strncpy(fullpath,path,511);
+	strncat("/",fullpath,1);
+	strncat(fullpath,filename,511);
+	FILE *file;
+	
+	//Open file
+	file = fopen(fullpath, "rb");
+	if (!file)
+	{
+		fprintf(stderr, "Unable to open file %s", fullpath);
+		return EXIT_FAILURE;
+	}
+	
+	//Get file length
+	fseek(file, 0, SEEK_END);
+	*cbBuffer=ftell(file);
+	fseek(file, 0, SEEK_SET);
+
+	//Allocate memory
+	ppBuffer=(uint8_t *)malloc((*cbBuffer)+1);
+	if (!ppBuffer)
+	{
+		fprintf(stderr, "Memory error!");
+		fclose(file);
+		return EXIT_FAILURE;
+	}
+
+	//Read file contents into buffer
+	fread(ppBuffer, *cbBuffer, 1, file);
+	fclose(file);
+
+	return 0;
 }
