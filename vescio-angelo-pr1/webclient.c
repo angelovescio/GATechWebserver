@@ -1,6 +1,12 @@
+#include <stdio.h>
 #include <stdlib.h>
+#include <unistd.h>
+#include <string.h>
+#include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include <arpa/inet.h>
+#include <netdb.h>
 #include "llist.h"
 #include "optlist/optlist.h"
 
@@ -13,15 +19,36 @@ pthread_mutex_t mtx;
 pthread_cond_t *cond;
 pthread_cond_t *cond2;
 
+int getFileForBuffer(char* path,char* filename, uint8_t * ppBuffer, int * cbBuffer);
 void worker(void *threadarg);
 
 int main(int argc, char *argv[])
 {
+	int sockfd = 0, n = 0;
+    char recvBuff[1024];
+    struct sockaddr_in serv_addr; 
+
+	//char* host;//[64] = "0.0.0.0";
+	char host[64] = "0.0.0.0";
+	char workPath[1024];
+	char downloadPath[1024];
+	char metricPath[1024];
+	int cThreads = 1;
+	int port = 8888;
+	int cRequests = 10;
+
+	memset(workPath,0,sizeof(workPath));
+	memset(downloadPath,0,sizeof(downloadPath));
+	memset(metricPath,0,sizeof(metricPath));
 	option_t *optList, *thisOpt;
 
     /* get list of command line options and their arguments */
 	optList = NULL;
 	optList = GetOptList(argc, argv, "s:ptw:drmh");
+
+	uint8_t buf[BUFFER_SIZE];
+	int outSize = 0;
+	getFileForBuffer(".","workload-0.txt",&buf,&outSize);
 
     /* display results of parsing */
 	while (optList != NULL)
@@ -58,127 +85,175 @@ int main(int argc, char *argv[])
             FreeOptList(thisOpt);   /* free the rest of the list */
 			return EXIT_SUCCESS;
 		}
-
-		printf("found option %c\n", thisOpt->option);
-
-		if (thisOpt->argument != NULL)
+		else if('s' == thisOpt->option)
 		{
-			printf("\tfound argument %s", thisOpt->argument);
-			printf(" at index %d\n", thisOpt->argIndex);
+			if (thisOpt->argument != NULL)
+			{
+				//host = thisOpt->argument;
+				memset(host,0,sizeof host);
+				strncpy(host,thisOpt->argument,sizeof(host)-1);
+			}
 		}
-		else
+		else if('p' == thisOpt->option)
 		{
-			printf("\tno argument for this option\n");
+			if (thisOpt->argument != NULL)
+			{
+				port = atoi(thisOpt->argument);
+			}
 		}
+		else if('t' == thisOpt->option)
+		{
+			if (thisOpt->argument != NULL)
+			{
+				cThreads = atoi(thisOpt->argument);
+			}
+		}
+		else if('w' == thisOpt->option)
+		{
+			if (thisOpt->argument != NULL)
+			{
+				strncpy(workPath, thisOpt->argument,sizeof(workPath)-1);
+			}
+		}
+		else if('d' == thisOpt->option)
+		{
+			if (thisOpt->argument != NULL)
+			{
+				strncpy(downloadPath, thisOpt->argument,sizeof(downloadPath)-1);
+			}
+		}
+		else if('r' == thisOpt->option)
+		{
+			if (thisOpt->argument != NULL)
+			{
+				cRequests = atoi(thisOpt->argument);
+			}
+		}
+		else if('m' == thisOpt->option)
+		{
+			if (thisOpt->argument != NULL)
+			{
+				strncpy(metricPath,thisOpt->argument,sizeof(metricPath)-1);
+			}
+		}
+memset(recvBuff, '0',sizeof(recvBuff));
+    if((sockfd = socket(AF_INET, SOCK_STREAM, 0)) < 0)
+    {
+        printf("\n Error : Could not create socket \n");
+        return 1;
+    } 
+
+    memset(&serv_addr, '0', sizeof(serv_addr)); 
+
+    serv_addr.sin_family = AF_INET;
+    serv_addr.sin_port = htons(port); 
+
+    if(inet_pton(AF_INET, host, &serv_addr.sin_addr)<=0)
+    {
+        printf("\n inet_pton error occured\n");
+        return 1;
+    } 
+
+    if( connect(sockfd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0)
+    {
+       printf("\n Error : Connect Failed \n");
+       return 1;
+    } 
+
+    while ( (n = read(sockfd, recvBuff, sizeof(recvBuff)-1)) > 0)
+    {
+        recvBuff[n] = 0;
+        if(fputs(recvBuff, stdout) == EOF)
+        {
+            printf("\n Error : Fputs error\n");
+        }
+    } 
+
+    if(n < 0)
+    {
+        printf("\n Read error \n");
+    } 
 
         free(thisOpt);    /* done with this item, free it */
-	}
+		}
 
 	return EXIT_SUCCESS;
 }
-int boss(int cThreads,int hPort,char* chIpAddress)
-{
-	char* chIp = "0.0.0.0";
-	int hSocket, hServerSocket;  /* handle to socket */
-	struct hostent* pHostInfo;   /* holds info about a machine */
-	struct sockaddr_in Address; /* Internet socket address stuct */
-	int nAddressSize = sizeof(struct sockaddr_in);
-	int nHostPort = 8888;
-	int numThreads = 1;
-
-	int i;
-
-	//init(&head,&tail);
-	init();
-
-	printf("\nStarting server");
-
-	printf("\nMaking socket");
-/* make a socket */
-	hServerSocket=socket(AF_INET,SOCK_STREAM,0);
-
-	if(hServerSocket == SOCKET_ERROR)
+	/*
+	boss()
 	{
-		printf("\nCould not make a socket\n");
-		return 0;
+		create array for workload paths
+		char paths[cFiles][1024];
+		put path into array
+		for(int i =0 //line in workload)
+		{
+			//add to file list
+			paths[i] = createFileFullPath(path,filename)
+		}
+		for(int i = 0,j=0;i<cRequests;i++;j++)
+		{
+			if(cFiles <= j)
+			{
+				j =0;
+			}
+			//add path to queue - global
+			enqueue(paths[j]);
+		}
+		for(int i =0; i< threadCount;i++)
+		{
+			create_thread(ip,port
+		}
 	}
+*/
+	int boss(int cThreads,int hPort,char* chIpAddress)
+	{
 
-/* fill address struct */
-	Address.sin_addr.s_addr = INADDR_ANY;
-	Address.sin_port = htons(hPort);
-	Address.sin_family = AF_INET;
+		while(1) {
 
-	printf("\nBinding to port %d\n",hPort);
+			pthread_mutex_lock(&mtx);
+			printf("\nWaiting for a connection");
 
-/* bind to a port */
-	if(bind(hServerSocket,(struct sockaddr*)&Address,sizeof(Address)) == SOCKET_ERROR) {
-		printf("\nCould not connect to host\n");
-		return 0;
+			while(!empty()) {
+				pthread_cond_wait (&cond2, &mtx);
+			}
+
+
+			//enqueue(hSocket);
+
+			pthread_mutex_unlock(&mtx);
+    	pthread_cond_signal(&cond);     // wake worker thread
+    }
+}
+/*
+	worker(ip,port,downloadPath)
+	{
+		char * path = "";
+		lock(mutex)
+		{
+			path = popItemFromQueue();
+		}
+		char* message formatMessageIntoGetFile(path);
+		int hSocket = create_socket(ip,port);
+		send_request(hSocket);
+		uint8_t * pBuffer;
+		listen_and_read(pBuffer)
+		save_to_downloads(pBuffer)
 	}
-/*  get port number */
-	getsockname(hServerSocket, (struct sockaddr *) &Address,(socklen_t *)&nAddressSize);
-
-	printf("Opened socket as fd (%d) on port (%d) for stream i/o\n",hServerSocket, ntohs(Address.sin_port));
-
-	printf("Server\n\
-		sin_family        = %d\n\
-		sin_addr.s_addr   = %d\n\
-		sin_port          = %d\n"
-		, Address.sin_family
-		, Address.sin_addr.s_addr
-		, ntohs(Address.sin_port)
-		);
-//Up to this point is boring server set up stuff. I need help below this.
-//**********************************************
-
-//instantiate all threads
-	pthread_t tid[cThreads];
-
-	for(i = 0; i < cThreads; i++) {
-		pthread_create(&tid[i],NULL,&worker,NULL);
-	}
-
-	printf("\nMaking a listen queue of %d elements",QUEUE_SIZE);
-/* establish listen queue */
-	if(listen(hServerSocket,QUEUE_SIZE) == SOCKET_ERROR) {
-		printf("\nCould not listen\n");
-		return 0;
-	}
-
-	while(1) {
+	*/
+	void worker(void *threadarg) {
 
 		pthread_mutex_lock(&mtx);
-		printf("\nWaiting for a connection");
-
-		while(!empty()) {
-			pthread_cond_wait (&cond2, &mtx);
+		int totalBytesSent = 0;
+		while(empty(head,tail)) {
+			pthread_cond_wait(&cond, &mtx);
 		}
+		int hSocket = dequeue((struct node*)threadarg);
+		char allText[BUFFER_SIZE];
+		unsigned nSendAmount, nRecvAmount;
+		char line[BUFFER_SIZE];
 
-    /* get the connected socket */
-		hSocket = accept(hServerSocket,(struct sockaddr*)&Address,(socklen_t *)&nAddressSize);
-
-		printf("\nGot a connection");
-
-		enqueue(hSocket);
-
-		pthread_mutex_unlock(&mtx);
-    	pthread_cond_signal(&cond);     // wake worker thread
-	}
-}
-void worker(void *threadarg) {
-
-	pthread_mutex_lock(&mtx);
-	int totalBytesSent = 0;
-	while(empty(head,tail)) {
-		pthread_cond_wait(&cond, &mtx);
-	}
-	int hSocket = dequeue((struct node*)threadarg);
-	char allText[BUFFER_SIZE];
-	unsigned nSendAmount, nRecvAmount;
-	char line[BUFFER_SIZE];
-
-	nRecvAmount = read(hSocket,line,sizeof line);
-	printf("\nReceived %s from client\n",line);
+		nRecvAmount = read(hSocket,line,sizeof line);
+		printf("\nReceived %s from client\n",line);
 
 
 //***********************************************
@@ -186,21 +261,66 @@ void worker(void *threadarg) {
 //*********************************************** 
 
 
-	nSendAmount = write(hSocket,allText,sizeof(allText));
+		nSendAmount = write(hSocket,allText,sizeof(allText));
 
-	if(nSendAmount != -1) {
-		totalBytesSent = totalBytesSent + nSendAmount;
-	}
-	printf("\nSending result: \"%s\" back to client\n",allText);
+		if(nSendAmount != -1) {
+			totalBytesSent = totalBytesSent + nSendAmount;
+		}
+		printf("\nSending result: \"%s\" back to client\n",allText);
 
-	printf("\nClosing the socket");
+		printf("\nClosing the socket");
 /* close socket */
-	if(close(hSocket) == SOCKET_ERROR) {
-		printf("\nCould not close socket\n");
+		if(close(hSocket) == SOCKET_ERROR) {
+			printf("\nCould not close socket\n");
+			return 0;
+		}
+
+
+		pthread_mutex_unlock(&mtx);
+		pthread_cond_signal(&cond2);
+	}
+//read the workload file and return a buffer containing the file
+	int getFileForBuffer(char* path,char* filename, uint8_t * ppBuffer, int * cbBuffer){
+		char fullpath[1024];
+		memset(fullpath,0,1024);
+		if(strnlen(path,512) >=512)
+		{
+			return EXIT_FAILURE;
+		}
+		if(strnlen(filename,512) >=512)
+		{
+			return EXIT_FAILURE;
+		}
+		strncpy(fullpath,path,511);
+		strncat(fullpath,"/",1);
+		strncat(fullpath,filename,511);
+		FILE *file;
+
+	//Open file
+		file = fopen(fullpath, "rb");
+		if (!file)
+		{
+			fprintf(stderr, "Unable to open file %s", fullpath);
+			return EXIT_FAILURE;
+		}
+
+	//Get file length
+		fseek(file, 0, SEEK_END);
+		*cbBuffer=ftell(file);
+		fseek(file, 0, SEEK_SET);
+
+	//Allocate memory
+		ppBuffer=(uint8_t *)malloc((*cbBuffer)+1);
+		if (!ppBuffer)
+		{
+			fprintf(stderr, "Memory error!");
+			fclose(file);
+			return EXIT_FAILURE;
+		}
+
+	//Read file contents into buffer
+		fread(ppBuffer, *cbBuffer, 1, file);
+		fclose(file);
+
 		return 0;
 	}
-
-
-	pthread_mutex_unlock(&mtx);
-	pthread_cond_signal(&cond2);
-}
