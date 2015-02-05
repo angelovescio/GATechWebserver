@@ -7,6 +7,7 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <netdb.h>
+#include <assert.h>
 #include "llist.h"
 #include "optlist/optlist.h"
 
@@ -19,14 +20,15 @@ pthread_mutex_t mtx;
 pthread_cond_t *cond;
 pthread_cond_t *cond2;
 
-int getFileForBuffer(char* path,char* filename, uint8_t * ppBuffer, int * cbBuffer);
+int getFileForBuffer(char* path,char* filename, uint8_t ** ppBuffer, int * cbBuffer);
 void worker(void *threadarg);
+char** str_split(char* a_str, const char a_delim,int * cElements);
 
 int main(int argc, char *argv[])
 {
 	int sockfd = 0, n = 0;
-    char recvBuff[1024];
-    struct sockaddr_in serv_addr; 
+	char recvBuff[1024];
+	struct sockaddr_in serv_addr; 
 
 	//char* host;//[64] = "0.0.0.0";
 	char host[64] = "0.0.0.0";
@@ -47,9 +49,11 @@ int main(int argc, char *argv[])
 	optList = GetOptList(argc, argv, "s:ptw:drmh");
 
 	uint8_t buf[BUFFER_SIZE];
+	memset(buf,0,BUFFER_SIZE);
 	int outSize = 0;
+	int outElems = 0;
 	getFileForBuffer(".","workload-0.txt",&buf,&outSize);
-
+	char** splitStr = str_split(buf,'\n',&outElems);
     /* display results of parsing */
 	while (optList != NULL)
 	{
@@ -136,48 +140,106 @@ int main(int argc, char *argv[])
 				strncpy(metricPath,thisOpt->argument,sizeof(metricPath)-1);
 			}
 		}
-memset(recvBuff, '0',sizeof(recvBuff));
-    if((sockfd = socket(AF_INET, SOCK_STREAM, 0)) < 0)
-    {
-        printf("\n Error : Could not create socket \n");
-        return 1;
-    } 
+		memset(recvBuff, '0',sizeof(recvBuff));
+		if((sockfd = socket(AF_INET, SOCK_STREAM, 0)) < 0)
+		{
+			printf("\n Error : Could not create socket \n");
+			return 1;
+		} 
 
-    memset(&serv_addr, '0', sizeof(serv_addr)); 
+		memset(&serv_addr, '0', sizeof(serv_addr)); 
 
-    serv_addr.sin_family = AF_INET;
-    serv_addr.sin_port = htons(port); 
+		serv_addr.sin_family = AF_INET;
+		serv_addr.sin_port = htons(port); 
 
-    if(inet_pton(AF_INET, host, &serv_addr.sin_addr)<=0)
-    {
-        printf("\n inet_pton error occured\n");
-        return 1;
-    } 
+		if(inet_pton(AF_INET, host, &serv_addr.sin_addr)<=0)
+		{
+			printf("\n inet_pton error occured\n");
+			return 1;
+		} 
 
-    if( connect(sockfd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0)
-    {
-       printf("\n Error : Connect Failed \n");
-       return 1;
-    } 
+		if( connect(sockfd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0)
+		{
+			printf("\n Error : Connect Failed \n");
+			return 1;
+		} 
+		for(int i =0; i<outElems;i++)
+		{
+			sprintf(recvBuff,"GetFile GET %s",splitStr[i]);
+			printf("Request was: %s\n",recvBuff);
+			n = write(sockfd, recvBuff, sizeof(recvBuff)-1);
+			if(n<=0)
+			{
+				printf("\n Error : Writing to socket\n");
+			}
+			memset(recvBuff, '0',sizeof(recvBuff));
+		}
+		
+		while ( (n = read(sockfd, recvBuff, sizeof(recvBuff)-1)) > 0)
+		{
+			recvBuff[n] = 0;
+			if(fputs(recvBuff, stdout) == EOF)
+			{
+				printf("\n Error : Fputs error\n");
+			}
+		} 
 
-    while ( (n = read(sockfd, recvBuff, sizeof(recvBuff)-1)) > 0)
-    {
-        recvBuff[n] = 0;
-        if(fputs(recvBuff, stdout) == EOF)
-        {
-            printf("\n Error : Fputs error\n");
-        }
-    } 
-
-    if(n < 0)
-    {
-        printf("\n Read error \n");
-    } 
+		if(n < 0)
+		{
+			printf("\n Read error \n");
+		} 
 
         free(thisOpt);    /* done with this item, free it */
-		}
+	}
 
 	return EXIT_SUCCESS;
+}
+char** str_split(char* a_str, const char a_delim,int * cElements)
+{
+	char** result    = 0;
+	size_t count     = 0;
+	char* tmp        = a_str;
+	char* last_comma = 0;
+	char delim[2];
+	delim[0] = a_delim;
+	delim[1] = 0;
+
+    /* Count how many elements will be extracted. */
+	while (*tmp)
+	{
+		if (a_delim == *tmp)
+		{
+			count++;
+			last_comma = tmp;
+		}
+		tmp++;
+	}
+
+    /* Add space for trailing token. */
+	count += last_comma < (a_str + strlen(a_str) - 1);
+
+    /* Add space for terminating null string so caller
+       knows where the list of returned strings ends. */
+	count++;
+
+	result = malloc(sizeof(char*) * count);
+
+	if (result)
+	{
+		size_t idx  = 0;
+		char* token = strtok(a_str, delim);
+		while (token)
+		{
+			assert(idx < count);
+			*(result + idx++) = strdup(token);
+			token = strtok(0, delim);
+			*cElements += 1;
+		}
+		assert(idx == count - 1);
+		*(result + idx) = 0;
+	}
+	
+	return result;
 }
 	/*
 	boss()
@@ -280,7 +342,7 @@ memset(recvBuff, '0',sizeof(recvBuff));
 		pthread_cond_signal(&cond2);
 	}
 //read the workload file and return a buffer containing the file
-	int getFileForBuffer(char* path,char* filename, uint8_t * ppBuffer, int * cbBuffer){
+	int getFileForBuffer(char* path,char* filename, uint8_t ** ppBuffer, int * cbBuffer){
 		char fullpath[1024];
 		memset(fullpath,0,1024);
 		if(strnlen(path,512) >=512)
@@ -310,7 +372,7 @@ memset(recvBuff, '0',sizeof(recvBuff));
 		fseek(file, 0, SEEK_SET);
 
 	//Allocate memory
-		ppBuffer=(uint8_t *)malloc((*cbBuffer)+1);
+		*ppBuffer=(uint8_t *)malloc((*cbBuffer)+1);
 		if (!ppBuffer)
 		{
 			fprintf(stderr, "Memory error!");
