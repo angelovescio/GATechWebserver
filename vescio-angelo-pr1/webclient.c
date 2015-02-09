@@ -1,13 +1,20 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <errno.h>
 #include <string.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
-#include <arpa/inet.h>
 #include <netdb.h>
+#include <arpa/inet.h>
+#include <sys/wait.h>
+#include <signal.h>
 #include <assert.h>
+#include <sys/time.h>
+
+#include "clientserver.h"
+#include "stats.h"
 #include "llist.h"
 #include "optlist/optlist.h"
 
@@ -21,9 +28,52 @@ pthread_cond_t *cond;
 pthread_cond_t *cond2;
 
 int getFileForBuffer(char* path,char* filename, uint8_t ** ppBuffer, int * cbBuffer);
-void worker(void *threadarg);
 char** str_split(char* a_str, const char a_delim,int * cElements);
+//read the workload file and return a buffer containing the file
+	int getFileForBuffer(char* path,char* filename, uint8_t ** ppBuffer, int * cbBuffer){
+		char fullpath[1024];
+		memset(fullpath,0,1024);
+		if(strnlen(path,512) >=512)
+		{
+			return EXIT_FAILURE;
+		}
+		if(strnlen(filename,512) >=512)
+		{
+			return EXIT_FAILURE;
+		}
+		strncpy(fullpath,path,511);
+		strncat(fullpath,"/",1);
+		strncat(fullpath,filename,511);
+		FILE *file;
 
+	//Open file
+		file = fopen(fullpath, "rb");
+		if (!file)
+		{
+			fprintf(stderr, "Unable to open file %s", fullpath);
+			return EXIT_FAILURE;
+		}
+
+	//Get file length
+		fseek(file, 0, SEEK_END);
+		*cbBuffer=ftell(file);
+		fseek(file, 0, SEEK_SET);
+
+	//Allocate memory
+		*ppBuffer=(uint8_t *)malloc((*cbBuffer)+1);
+		if (!ppBuffer)
+		{
+			fprintf(stderr, "Memory error!");
+			fclose(file);
+			return EXIT_FAILURE;
+		}
+
+	//Read file contents into buffer
+		fread(ppBuffer, *cbBuffer, 1, file);
+		fclose(file);
+
+		return 0;
+	}
 int main(int argc, char *argv[])
 {
 	int sockfd = 0, n = 0;
@@ -140,54 +190,79 @@ int main(int argc, char *argv[])
 				strncpy(metricPath,thisOpt->argument,sizeof(metricPath)-1);
 			}
 		}
-		memset(recvBuff, '0',sizeof(recvBuff));
-		if((sockfd = socket(AF_INET, SOCK_STREAM, 0)) < 0)
-		{
-			printf("\n Error : Could not create socket \n");
-			return 1;
-		} 
+		fd_set readfds;
+		struct timeval tv;
 
-		memset(&serv_addr, '0', sizeof(serv_addr)); 
-
-		serv_addr.sin_family = AF_INET;
-		serv_addr.sin_port = htons(port); 
-
-		if(inet_pton(AF_INET, host, &serv_addr.sin_addr)<=0)
-		{
-			printf("\n inet_pton error occured\n");
-			return 1;
-		} 
-
-		if( connect(sockfd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0)
-		{
-			printf("\n Error : Connect Failed \n");
-			return 1;
-		} 
-		for(int i =0; i<outElems;i++)
-		{
-			sprintf(recvBuff,"GetFile GET %s",splitStr[i]);
-			printf("Request was: %s\n",recvBuff);
-			n = write(sockfd, recvBuff, sizeof(recvBuff)-1);
-			if(n<=0)
-			{
-				printf("\n Error : Writing to socket\n");
-			}
-			memset(recvBuff, '0',sizeof(recvBuff));
-		}
+		// use server IP:port from cmd line args if supplied, otherwise use default values
+		char buffer [33];
+		snprintf(buffer,sizeof buffer,"%d",10);
+		const char* serverIP = host;
+		const char* serverPort = buffer;
 		
-		while ( (n = read(sockfd, recvBuff, sizeof(recvBuff)-1)) > 0)
-		{
-			recvBuff[n] = 0;
-			if(fputs(recvBuff, stdout) == EOF)
-			{
-				printf("\n Error : Fputs error\n");
-			}
-		} 
+		
+		printf("Connecting to server %s:%d...\n", host, port);
 
-		if(n < 0)
-		{
-			printf("\n Read error \n");
-		} 
+		conn_t* serverconn = connect_tcp(serverIP, serverPort);
+		if (!serverconn)
+			return -1;
+
+		// connection stats
+		connxnstats_t* stats = stats_initialize();
+
+		//"data" to send, and to receive and verify
+		unsigned char recvCounter=0; // counter to check received values are as expected and in order
+		unsigned char recvBuf[2000];
+		unsigned char sendBuf[2000];
+		sendBuf[0] = 0;
+
+		while (1) {
+			tv.tv_sec = 0;
+			tv.tv_usec = 10000; // 10ms
+			FD_ZERO(&readfds);
+			FD_SET(serverconn->sockfd, &readfds);
+			
+			//TODO: abstract the select logic out of the main application
+			if (select(serverconn->sockfd + 1, &readfds, NULL, NULL, &tv) == -1) {
+				perror("select failed\n");
+				disconnect_tcp(serverconn);
+				break;
+			}
+			
+			// recv data if available
+			if (FD_ISSET(serverconn->sockfd, &readfds)) {
+
+				// recv data
+				int retVal = recvData(serverconn, (char*)recvBuf, (int)sizeof(recvBuf));
+				if (retVal <= 0)
+					break;
+				if(retVal>0)
+				{
+					printf("%s\n", recvBuf);
+				}
+				// report stats
+				stats_reportBytesRecd(stats, retVal); //stats reporting
+
+				// ensure integrity of data received
+				// for(int i=0; i<retVal; i++) {
+				// 	assert(recvBuf[i] == recvCounter++);
+				// }
+			}
+			snprintf(sendBuf,sizeof sendBuf, "Hello server %d\r\n",time(NULL));
+			
+			// send data
+			if (sendBuf[0]%4 == 0) {
+				int retVal = sendData(serverconn, (char*)sendBuf, (int)sizeof(sendBuf));
+				if (retVal <= 0)
+					break;
+
+				// report stats
+				stats_reportBytesSent(stats, retVal); //stats reporting
+			}
+			sendBuf[0] = sendBuf[0] + 1;
+		}
+
+		// print final stats before exiting
+		stats_finalize(stats);
 
         free(thisOpt);    /* done with this item, free it */
 	}
@@ -241,148 +316,3 @@ char** str_split(char* a_str, const char a_delim,int * cElements)
 	
 	return result;
 }
-	/*
-	boss()
-	{
-		create array for workload paths
-		char paths[cFiles][1024];
-		put path into array
-		for(int i =0 //line in workload)
-		{
-			//add to file list
-			paths[i] = createFileFullPath(path,filename)
-		}
-		for(int i = 0,j=0;i<cRequests;i++;j++)
-		{
-			if(cFiles <= j)
-			{
-				j =0;
-			}
-			//add path to queue - global
-			enqueue(paths[j]);
-		}
-		for(int i =0; i< threadCount;i++)
-		{
-			create_thread(ip,port
-		}
-	}
-*/
-	int boss(int cThreads,int hPort,char* chIpAddress)
-	{
-
-		while(1) {
-
-			pthread_mutex_lock(&mtx);
-			printf("\nWaiting for a connection");
-
-			while(!empty()) {
-				pthread_cond_wait (&cond2, &mtx);
-			}
-
-
-			//enqueue(hSocket);
-
-			pthread_mutex_unlock(&mtx);
-    	pthread_cond_signal(&cond);     // wake worker thread
-    }
-}
-/*
-	worker(ip,port,downloadPath)
-	{
-		char * path = "";
-		lock(mutex)
-		{
-			path = popItemFromQueue();
-		}
-		char* message formatMessageIntoGetFile(path);
-		int hSocket = create_socket(ip,port);
-		send_request(hSocket);
-		uint8_t * pBuffer;
-		listen_and_read(pBuffer)
-		save_to_downloads(pBuffer)
-	}
-	*/
-	void worker(void *threadarg) {
-
-		pthread_mutex_lock(&mtx);
-		int totalBytesSent = 0;
-		while(empty(head,tail)) {
-			pthread_cond_wait(&cond, &mtx);
-		}
-		int hSocket = dequeue((struct node*)threadarg);
-		char allText[BUFFER_SIZE];
-		unsigned nSendAmount, nRecvAmount;
-		char line[BUFFER_SIZE];
-
-		nRecvAmount = read(hSocket,line,sizeof line);
-		printf("\nReceived %s from client\n",line);
-
-
-//***********************************************
-//DO ALL HTTP PARSING (Removed for the sake of space; I can add it back if needed)
-//*********************************************** 
-
-
-		nSendAmount = write(hSocket,allText,sizeof(allText));
-
-		if(nSendAmount != -1) {
-			totalBytesSent = totalBytesSent + nSendAmount;
-		}
-		printf("\nSending result: \"%s\" back to client\n",allText);
-
-		printf("\nClosing the socket");
-/* close socket */
-		if(close(hSocket) == SOCKET_ERROR) {
-			printf("\nCould not close socket\n");
-			return 0;
-		}
-
-
-		pthread_mutex_unlock(&mtx);
-		pthread_cond_signal(&cond2);
-	}
-//read the workload file and return a buffer containing the file
-	int getFileForBuffer(char* path,char* filename, uint8_t ** ppBuffer, int * cbBuffer){
-		char fullpath[1024];
-		memset(fullpath,0,1024);
-		if(strnlen(path,512) >=512)
-		{
-			return EXIT_FAILURE;
-		}
-		if(strnlen(filename,512) >=512)
-		{
-			return EXIT_FAILURE;
-		}
-		strncpy(fullpath,path,511);
-		strncat(fullpath,"/",1);
-		strncat(fullpath,filename,511);
-		FILE *file;
-
-	//Open file
-		file = fopen(fullpath, "rb");
-		if (!file)
-		{
-			fprintf(stderr, "Unable to open file %s", fullpath);
-			return EXIT_FAILURE;
-		}
-
-	//Get file length
-		fseek(file, 0, SEEK_END);
-		*cbBuffer=ftell(file);
-		fseek(file, 0, SEEK_SET);
-
-	//Allocate memory
-		*ppBuffer=(uint8_t *)malloc((*cbBuffer)+1);
-		if (!ppBuffer)
-		{
-			fprintf(stderr, "Memory error!");
-			fclose(file);
-			return EXIT_FAILURE;
-		}
-
-	//Read file contents into buffer
-		fread(ppBuffer, *cbBuffer, 1, file);
-		fclose(file);
-
-		return 0;
-	}

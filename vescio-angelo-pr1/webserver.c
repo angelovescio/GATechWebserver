@@ -8,7 +8,11 @@
 #include <signal.h>
 #include <errno.h>
 #include <time.h>
+#include <unistd.h>
+#include <assert.h>
 #include "llist.h"
+#include "clientserver.h"
+#include "stats.h"
 #include "optlist/optlist.h"
 
 #define SOCKET_ERROR -1
@@ -90,53 +94,31 @@ int main(int argc, char *argv[])
 		}
         free(thisOpt);    /* done with this item, free it */
         /* The pthread_t type is a struct representing a single thread. */
-	pthread_t server_thread;
+		pthread_t server_thread;
 
 	/* If a client closes a connection, this will generally produce a SIGPIPE
            signal that will kill the process. We want to ignore this signal, so
 	   send() just returns -1 when this happens. */
-	sigset_t new;
-	sigemptyset (&new);
-	sigaddset(&new, SIGPIPE);
-	if (pthread_sigmask(SIG_BLOCK, &new, NULL) != 0) 
-	{
-		perror("Unable to mask SIGPIPE");
-		exit(-1);
-	}
+           sigset_t new;
+           sigemptyset (&new);
+           sigaddset(&new, SIGPIPE);
+           if (pthread_sigmask(SIG_BLOCK, &new, NULL) != 0) 
+           {
+           	perror("Unable to mask SIGPIPE");
+           	exit(-1);
+           }
+		if (pthread_create(&server_thread, NULL, accept_clients, port) < 0)
+	   	{
+	   		perror("Could not create server thread");
+	   		exit(-1);
+	   	}
 
-	/* The pthread_create function creates a new thread.
-	   The first parameter is a pointer to a pthread_t variable, which we can use
-	   in the remainder of the program to manage this thread.
-	   The second parameter is used to specify the attributes of this new thread
-	   (e.g., its stack size). We can leave it NULL here.
-	   The third parameter is the function this thread will run. This function *must*
-	   have the following prototype:
-	       void *f(void *args);
-	   Note how the function expects a single parameter of type void*. The fourth
-	   parameter to pthread_create is used to specify this parameter. In this case,
-	   we have no parameters to pass to the thread function, so we leave it NULL.
-	   If we _do_ need to pass parameters, we will typically malloc a struct
-	   with the necessary args. The thread function is typically responsible
-	   for freeing this struct.
-	   The thread we are creating here is the "server thread", which will be
-	   responsible for listening on port 23300 for incoming connections. This thread,
-	   in turn, will spawn threads to service each incoming connection, allowing
-	   multiple clients to connect simultaneously.
-	   Note that, in this particular example, creating a "server thread" is redundant,
-	   since there will only be one server thread, and the program's main thread (the 
-           one running main()) could fulfill this purpose. */
-	if (pthread_create(&server_thread, NULL, accept_clients, NULL) < 0)
-	{
-		perror("Could not create server thread");
-		exit(-1);
-	}
+	   	pthread_join(server_thread, NULL);
 
-	pthread_join(server_thread, NULL);
-
-	pthread_exit(NULL);
+	   	pthread_exit(NULL);
+	   }
+	   return EXIT_SUCCESS;
 	}
-	return EXIT_SUCCESS;
-}
 
 /* This is the function that is run by the "server thread".
    The socket code is similar to oneshot-single.c, except that we will
@@ -151,102 +133,78 @@ int main(int argc, char *argv[])
  */
 void *accept_clients(void *args)
 {
-	int serverSocket;
-	int clientSocket;
-	pthread_t worker_thread;
-	struct addrinfo hints, *res, *p;
-	struct sockaddr_storage *clientAddr;
-	socklen_t sinSize = sizeof(struct sockaddr_storage);
-	struct workerArgs *wa;
-	int yes = 1;
+	struct timeval tv;
+	fd_set readfds;
+	
+	// use listen port from cmd line args if supplied, otherwise use default value
+	const char* listenPort = (char *)args;
 
-	memset(&hints, 0, sizeof hints);
-	hints.ai_family = AF_UNSPEC;
-	hints.ai_socktype = SOCK_STREAM;
-	hints.ai_flags = AI_PASSIVE; // Return my address, so I can bind() to it
+	conn_t* listenconn = listen_tcp(listenPort);
+	if (!listenconn)
+		return -1;
 
-	/* Note how we call getaddrinfo with the host parameter set to NULL */
-	if (getaddrinfo(NULL, port, &hints, &res) != 0)
-	{
-		perror("getaddrinfo() failed");
-		pthread_exit(NULL);
-	}
-
-	for(p = res;p != NULL; p = p->ai_next) 
-	{
-		if ((serverSocket = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) == -1) 
-		{
-			perror("Could not open socket");
+	printf("\nWaiting for connection on %s...\n", listenPort);
+	while (1) {
+		// Accept a client socket
+		conn_t* clientconn = accept_tcp(listenconn);
+		if (!clientconn)
 			continue;
-		}
 
-		if (setsockopt(serverSocket, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int)) == -1)
-		{
-			perror("Socket setsockopt() failed");
-			close(serverSocket);
-			continue;
-		}
+		// connection stats - track how many bytes are sent/received and rates
+		connxnstats_t* stats = stats_initialize();
 
-		if (bind(serverSocket, p->ai_addr, p->ai_addrlen) == -1)
-		{
-			perror("Socket bind() failed");
-			close(serverSocket);
-			continue;
-		}
+		//"data" to send, and to receive and verify
+		unsigned char recvCounter=0;
+		unsigned char sendCounter=0;
+		unsigned char recvBuf[2000];
+		unsigned char sendBuf[2000];
+		sendBuf[0] = 0;
 
-		if (listen(serverSocket, 5) == -1)
-		{
-			perror("Socket listen() failed");
-			close(serverSocket);
-			continue;
-		}
+		while (1) {
+			tv.tv_sec = 0;
+			tv.tv_usec = 10000; //10ms
+			FD_ZERO(&readfds);
+			FD_SET(clientconn->sockfd, &readfds);
 
-		break;
+			//populate buffer to send
+			for (int i=0; i<(int)sizeof(sendBuf); i++) {
+				sendBuf[i] = sendCounter++;
+			}
+			
+			// check configured sockets
+			if (select(clientconn->sockfd + 1, &readfds, NULL, NULL, &tv) == -1) {
+				perror("select failed\n");
+				disconnect_tcp(clientconn);
+				break;
+			}
+
+			// recv data if available
+			if (FD_ISSET(clientconn->sockfd, &readfds)) {
+				int retVal = recvData(clientconn, (char*)recvBuf, (int)sizeof(recvBuf));
+				if (retVal <= 0)
+					break;
+				stats_reportBytesRecd(stats, retVal); //report bytes received for stats
+				
+				//ensure integrity of data received
+				// for (int i=0; i<retVal; i++) {
+				// 	assert(recvBuf[i] == recvCounter);
+				// 	recvCounter += 4;
+				// }
+			}
+
+			// send data
+			int retVal = sendData(clientconn, (char*)sendBuf, (int)sizeof(sendBuf));
+			if (retVal <= 0)
+				break;
+			stats_reportBytesSent(stats, retVal); //report bytes sent for stats
+		}
+		//print final stats before exiting and reset stats for next connection
+		stats_finalize(stats);
+
+		printf("\nWaiting for connection on %s...\n", listenPort);
 	}
 	
-	freeaddrinfo(res);
-
-	if (p == NULL)
-	{
-    		fprintf(stderr, "Could not find a socket to bind to.\n");
-		pthread_exit(NULL);
-	}
-
-	/* Loop and wait for connections */
-	while (1)
-	{
-		/* Call accept(). The thread will block until a client establishes a connection. */
-		clientAddr = malloc(sinSize);
-		if ((clientSocket = accept(serverSocket, (struct sockaddr *) clientAddr, &sinSize)) == -1) 
-		{
-			/* If this particular connection fails, no need to kill the entire thread. */
-			free(clientAddr);
-			perror("Could not accept() connection");
-			continue;
-		}
-
-		/* We're now connected to a client. We're going to spawn a "worker thread" to handle
-		   that connection. That way, the server thread can continue running, accept more connections,
-	 	   and spawn more threads to handle them. 
-		   The worker thread needs to know what socket it must use to communicate with the client,
-		   so we'll pass the clientSocket as a parameter to the thread. Although we could arguably
-		   just pass a pointer to clientSocket, it is good practice to use a struct that encapsulates
-		   the parameters to the thread (even if there is only one parameter). In this case, this is
-		   sone with the workerArgs struct. */
-		wa = malloc(sizeof(struct workerArgs));
-		wa->socket = clientSocket;
-
-		if (pthread_create(&worker_thread, NULL, service_single_client, wa) != 0) 
-		{
-			perror("Could not create a worker thread");
-			free(clientAddr);
-			free(wa);
-			close(clientSocket);
-			close(serverSocket);
-			pthread_exit(NULL);
-		}
-	}
-
+	disconnect_tcp(listenconn);
 	pthread_exit(NULL);
 }
 
@@ -259,43 +217,78 @@ void *accept_clients(void *args)
    code works.
  */
 void *service_single_client(void *args) {
-	struct workerArgs *wa;
-	int socket, nbytes;
-	char tosend[100];
+   	struct timeval tv;
+   	fd_set readfds;
 
-	/* Unpack the arguments */
-	wa = (struct workerArgs*) args;
-	socket = wa->socket;
+	// use listen port from cmd line args if supplied, otherwise use default value
+   	const char* listenPort = args;
 
-	/* This tells the pthreads library that no other thread is going to
-	   join() this thread. This means that, once this thread terminates,
-	   its resources can be safely freed (instead of keeping them around
-	   so they can be collected by another thread join()-ing this thread) */
-	pthread_detach(pthread_self());
+   	conn_t* listenconn = listen_tcp(listenPort);
+   	if (!listenconn)
+   		return -1;
 
-	fprintf(stderr, "Socket %d connected\n", socket);
+   	printf("\nWaiting for connection on %s...\n", listenPort);
 
-	while(1)
-	{
-		sprintf(tosend,"%d -- Hello, socket!\n", time(NULL));
+   	while (1) {
+		// Accept a client socket
+   		conn_t* clientconn = accept_tcp(listenconn);
+   		if (!clientconn)
+   			continue;
 
-		nbytes = send(socket, tosend, strlen(tosend), 0);
+		// connection stats - track how many bytes are sent/received and rates
+   		connxnstats_t* stats = stats_initialize();
 
-		if (nbytes == -1 && (errno == ECONNRESET || errno == EPIPE))
-		{
-			fprintf(stderr, "Socket %d disconnected\n", socket);
-			close(socket);
-			free(wa);
-			pthread_exit(NULL);
+		//"data" to send, and to receive and verify
+   		unsigned char recvCounter=0;
+   		unsigned char sendCounter=0;
+   		unsigned char recvBuf[2000];
+   		unsigned char sendBuf[2000];
+   		sendBuf[0] = 0;
+
+   		while (1) {
+   			tv.tv_sec = 0;
+			tv.tv_usec = 10000; //10ms
+			FD_ZERO(&readfds);
+			FD_SET(clientconn->sockfd, &readfds);
+
+			//populate buffer to send
+			for (int i=0; i<(int)sizeof(sendBuf); i++) {
+				sendBuf[i] = sendCounter++;
+			}
+			
+			// check configured sockets
+			if (select(clientconn->sockfd + 1, &readfds, NULL, NULL, &tv) == -1) {
+				perror("select failed\n");
+				disconnect_tcp(clientconn);
+				break;
+			}
+
+			// recv data if available
+			if (FD_ISSET(clientconn->sockfd, &readfds)) {
+				int retVal = recvData(clientconn, (char*)recvBuf, (int)sizeof(recvBuf));
+				if (retVal <= 0)
+					break;
+				stats_reportBytesRecd(stats, retVal); //report bytes received for stats
+				
+				//ensure integrity of data received
+				for (int i=0; i<retVal; i++) {
+					assert(recvBuf[i] == recvCounter);
+					recvCounter += 4;
+				}
+			}
+
+			// send data
+			int retVal = sendData(clientconn, (char*)sendBuf, (int)sizeof(sendBuf));
+			if (retVal <= 0)
+				break;
+			stats_reportBytesSent(stats, retVal); //report bytes sent for stats
 		}
-		else if (nbytes == -1)
-		{
-			perror("Unexpected error in send()");
-			free(wa);
-			pthread_exit(NULL);
-		}
-		sleep(5);
+		//print final stats before exiting and reset stats for next connection
+		stats_finalize(stats);
+
+		printf("\nWaiting for connection on %s...\n", listenPort);
 	}
-
-	pthread_exit(NULL);
+	
+	disconnect_tcp(listenconn);
+	return 1;
 }
