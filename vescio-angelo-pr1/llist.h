@@ -1,9 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
-
-typedef int bool;
-#define true 1
-#define false 0
+#include "clientserver.h"
 
 struct node {
 	int value;

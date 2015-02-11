@@ -6,8 +6,8 @@ ifneq ($(ARCH),Darwin)
 endif
 
 #default: webserver webclient
-SOURCECLIENT=optlist/optlist.c clientserver.c stats.c webclient.c
-SOURCESERVER=optlist/optlist.c clientserver.c stats.c webserver.c 
+SOURCECLIENT=optlist/optlist.c base64.c clientserver.c stats.c webclient.c
+SOURCESERVER=optlist/optlist.c base64.c clientserver.c stats.c webserver.c 
 OBJECTCLIENT=$(SOURCECLIENT:.c=.o)
 OBJECTSERVER=$(SOURCESERVER:.c=.o)
 
