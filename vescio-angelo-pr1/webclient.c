@@ -233,8 +233,14 @@ int main(int argc, char *argv[])
 		tv.tv_usec = 10000; // 10ms
 		FD_ZERO(&readfds);
 		FD_SET(serverconn->sockfd, &readfds);
-		
-		//TODO: abstract the select logic out of the main application
+		// if (setsockopt (serverconn->sockfd, SOL_SOCKET, SO_RCVTIMEO, (char *)&tv,
+  //               sizeof(tv)) < 0)
+	 //        error("setsockopt failed\n");
+
+	    // if (setsockopt (serverconn->sockfd, SOL_SOCKET, SO_SNDTIMEO, (char *)&tv,
+	    //             sizeof(tv)) < 0)
+	    //     error("setsockopt failed\n");
+	
 		if (select(serverconn->sockfd + 1, &readfds, NULL, NULL, &tv) == -1) {
 			perror("select failed\n");
 			disconnect_tcp(serverconn);
@@ -251,6 +257,7 @@ int main(int argc, char *argv[])
 				break;
 			if(retVal>0)
 			{
+				int total= retVal;
 				printf("Working on segment %d\n", 3);
 				int outResp = 0;
 				char** splitResp = str_split(recvBuf,' ',&outResp);
@@ -261,21 +268,52 @@ int main(int argc, char *argv[])
 					printf("split count was %d\n", outResp);
 					printf("data size was %d\n", atoi(splitResp[3]));
 					int dataSize = atoi(splitResp[3]);
+					int strCmdSize = retVal - strlen(splitResp[4]);
+					resizeBuffer = (uint8_t*)malloc(dataSize);
+					memset(resizeBuffer,0,dataSize);
+					memcpy(resizeBuffer,splitResp[4],strlen(splitResp[4]));
+					int writeAmount = strlen(splitResp[4]);
 					//printf("data was %s\n", splitResp[4]);
 					//status should be "GetFile STATUS filesize file"
-					if(dataSize > 4096)
+					if(retVal == 4096)
 					{
-						printf("%s\n", "Got here 7");
-						resizeBuffer = (uint8_t*)malloc(dataSize);
-						printf("%s\n", "Got here 8");
-						memcpy(resizeBuffer,splitResp[4],strlen(splitResp[4]));
-						printf("%s\n", "Got here 9 resizeBuffer: %s",resizeBuffer);
-						while(retVal == (int)sizeof(recvBuf))
+//start
+						char rBuf[4096];
+						for(int x=writeAmount;x<dataSize;x+=4096)
 						{
-							memset(recvBuf,0,(int)sizeof(recvBuf));
-							retVal = recvData(serverconn,  (char*)recvBuf, (int)sizeof(recvBuf));
-							strncat(resizeBuffer,recvBuf,(int)sizeof(recvBuf));
+							memset(rBuf,0,sizeof(rBuf));
+							int recvLeft = dataSize-x;
+							if( recvLeft<=4096)
+							{
+								memcpy(rBuf,&(resizeBuffer[x]),recvLeft);
+								printf("Fetching %d: %s\n",recvLeft, rBuf);
+								retVal = recvData(serverconn, rBuf, recvLeft);
+
+								break;
+							}
+							memcpy(rBuf,&(resizeBuffer[x]),sizeof(rBuf));
+							printf("Fetching %d: %s\n",sizeof(rBuf), rBuf);
+							retVal = recvData(serverconn, rBuf, sizeof(rBuf));
 						}
+
+
+
+///end
+
+						// printf("%s\n", "Got here 7");
+						// resizeBuffer = (uint8_t*)malloc(dataSize);
+						// printf("Total datasize was %d\n", dataSize);
+						// memcpy(resizeBuffer,splitResp[4],strlen(splitResp[4]));
+						// while(retVal > 0)
+						// {
+						// 	memset(recvBuf,0,(int)sizeof(recvBuf));
+						// 	printf("before retVal was %d in loop\n", retVal);
+						// 	retVal = recvData(serverconn,  (char*)recvBuf, (int)sizeof(recvBuf));
+						// 	printf("after retVal was %d in loop\n", retVal);
+						// 	total +=retVal;
+						// 	strncat(resizeBuffer,recvBuf,(int)sizeof(recvBuf));
+						// }
+						printf("Total received was %d\n", total);
 						writeFileToDisk(splitResp[2],resizeBuffer,dataSize,downloadPath);
 						printf("Got here 11 with retVal %d\n",retVal);
 					}
@@ -291,14 +329,14 @@ int main(int argc, char *argv[])
 			stats_reportBytesRecd(stats, retVal); 
 		}
 		snprintf(sendBuf,sizeof sendBuf, "GetFile GET %s",splitStr[i]);
-		
-		int retVal = sendData(serverconn, (char*)sendBuf, 
+		printf("%s\n", "sending data");
+		int retVal2 = sendData(serverconn, (char*)sendBuf, 
 			(int)sizeof(sendBuf));
-		if (retVal <= 0)
+		if (retVal2 <= 0)
 			break;
-
+		printf("%s\n", "sent data");
 		// report stats
-		stats_reportBytesSent(stats, retVal); //stats reporting				
+		stats_reportBytesSent(stats, retVal2); //stats reporting				
 		sendBuf[0] = sendBuf[0] + 1;
 	}
 	// print final stats before exiting
@@ -318,6 +356,7 @@ int writeFileToDisk(char* filename,uint8_t* pBuffer, int cbBuffer, char* destFol
 	//printf("data is %s\n", pBuffer);
 	printf("data is %d long\n", cbBuffer);
 	base64_decode(pBuffer,&data,cbBuffer,&outLen);
+	printf("pbuffer %s\n", pBuffer);
 	if(outLen >0)
 	{
 		printf("Writing the data of real length %d with buffer length %d\n", outLen, cbBuffer);

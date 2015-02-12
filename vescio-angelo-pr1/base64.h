@@ -9,9 +9,9 @@ static char encoding_table[] = {'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H',
 static char *decoding_table = NULL;
 static int mod_table[] = {0, 2, 1};
 int base64_encode(const unsigned char *data,
-    uint8_t ** encoded_data,
-                    size_t input_length,
-                    size_t *output_length);
+    char ** encoded_data,
+                    int input_length,
+                    int *output_length);
 
 int base64_decode(const char *data,
                             uint8_t ** decoded_data,

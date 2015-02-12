@@ -10,6 +10,7 @@
 #include <time.h>
 #include <unistd.h>
 #include <assert.h>
+#include <sys/stat.h>
 #include "llist.h"
 #include "clientserver.h"
 #include "stats.h"
@@ -28,7 +29,7 @@ struct workerArgs
 {
 	int socket;
 };
-int getFileForBuffer(char* path,char* filename, uint8_t ** ppBuffer,int cbBuffer, bool justTheSizeMaam);
+int getFileForBuffer(char* path,char* filename, uint8_t ** ppBuffer,int cbBuffer);
 char** str_split(char* a_str, const char a_delim,int * cElements);
 void *accept_clients(void *args);
 void *service_single_client(void *args);
@@ -42,7 +43,7 @@ char** str_split(char* a_str, const char a_delim,int * cElements)
 	char delim[2];
 	delim[0] = a_delim;
 	delim[1] = 0;
-
+printf("%s\n", "Got here 1");
     /* Count how many elements will be extracted. */
 	while (*tmp)
 	{
@@ -53,84 +54,94 @@ char** str_split(char* a_str, const char a_delim,int * cElements)
 		}
 		tmp++;
 	}
-
+printf("%s\n", "Got here 2");
     /* Add space for trailing token. */
 	count += last_comma < (a_str + strlen(a_str) - 1);
 
     /* Add space for terminating null string so caller
        knows where the list of returned strings ends. */
 	count++;
-
+printf("%s %d\n", "Got here 3",count);
 	result = malloc(sizeof(char*) * count);
-
+printf("%s\n", "Got here 4");
 	if (result)
 	{
 		size_t idx  = 0;
 		char* token = strtok(a_str, delim);
+		printf("%s\n", "Got here 5");	
 		while (token)
 		{
+			printf("%s\n", "Got here 6");	
 			assert(idx < count);
-			*(result + idx++) = strdup(token);
-			token = strtok(0, delim);
+			printf("%s\n", "Got here 7");
+			printf("Token %s\n", token);
+			*(result + idx) = strdup(token);
+			printf("%s\n", "Got here 8");
+			idx++;
 			*cElements += 1;
+			token = strtok(0, delim);
+
+			if(!token)
+			{
+				break;
+			}
+			printf("%s\n", "Got here 9");
+			
+			
+			printf("%s\n", "Got here 10");
 		}
+		printf("%s\n", "Got here 11");	
 		assert(idx == count - 1);
 		*(result + idx) = 0;
 	}
-	
+printf("%s\n", "Got here 12");	
 	return result;
 }
 //get file size
 int getFileSize(char* path,char* filename)
 {
-	char cw[1024];
-	memset(cw,0,1024);
-	getcwd(cw,1024);
+	printf("Got here getFileSize\n");
+	char cw[4096];
+	memset(cw,0,4096);
+	getcwd(cw,4096);
 	int count = 0;
-	strncat(cw,filename,511);
-	printf("%s\n", "Got here 1");
-	FILE *file;
+	strncat(cw,filename,2048);
+	printf("Got here getFileSize %s\n",cw);
+	struct stat sb;
+	if (stat(cw, &sb) == -1) {
+        perror("stat");
+        exit(EXIT_FAILURE);
+    }
 
-//Open file
-	file = fopen(cw, "rb");
-	if (!file)
-	{
-		perror("Open file");
-		return EXIT_FAILURE;
-	}
-	printf("%s\n", "Got here 2");
-	//Get file length
-	fseek(file, 0, SEEK_END);
-	count=ftell(file);
-	fclose(file);
-	return count;
+	return sb.st_size;
 }
 
 //read the requested file and return a buffer containing the file
-int getFileForBuffer(char* path,char* filename, uint8_t ** ppBuffer, int cbBuffer, bool justTheSizeMaam){
+int getFileForBuffer(char* path,char* filename, uint8_t ** ppBuffer, int cbBuffer){
 	char cw[1024];
 	memset(cw,0,1024);
 	getcwd(cw,1024);
 	
 	strncat(cw,filename,511);
-	printf("%s\n", "Got here 1");
-#ifdef DEBUG_BUILD
-	printf("Here is the message:n\n");
-	for (int i = 0; i < 1023; i++)
+	printf("%s %s\n", "Got here 1",cw);
+	if(*ppBuffer != NULL)
 	{
-	    printf("%02X", cw[i]);
+		free(*ppBuffer);
 	}
-#endif
+	*ppBuffer = calloc(cbBuffer,sizeof(uint8_t *));
+	printf("%s\n", "Got here 2");
+    uint8_t* data = *ppBuffer;
 	FILE *file;
 
 //Open file
 	file = fopen(cw, "rb");
+	
 	if (!file)
 	{
 		perror("Open file");
 		return EXIT_FAILURE;
 	}
-	if (!ppBuffer)
+	if (!data)
 	{
 		fprintf(stderr, "Memory error!");
 		fclose(file);
@@ -138,14 +149,16 @@ int getFileForBuffer(char* path,char* filename, uint8_t ** ppBuffer, int cbBuffe
 	}
 
 //Read file contents into buffer
-	if(!justTheSizeMaam)
-	{
-		printf("%s\n", "Got here 5");
-		fread(ppBuffer, 1, cbBuffer, file);
-		printf("%s\n", "Got here 6");
-	}
+	printf("%s\n", "Got here 5");
+	fread(data, 1, cbBuffer, file);
+	printf("%s\n", "Got here 6");
+	
 	fclose(file);
-	printf("%s\n", "returning from allocs");
+	for (int i = 0; i < cbBuffer; i++)
+	{
+	    printf("%02X", data[i]);
+	}
+	printf("%s\n", "returning from getFileForBuffer");
 	return 0;
 }
 int main(int argc, char *argv[])
@@ -203,6 +216,9 @@ int main(int argc, char *argv[])
         free(thisOpt);    /* done with this item, free it */
         
 	   }
+
+//	   accept_clients("8888");
+
 	   /* The pthread_t type is a struct representing a single thread. */
 		pthread_t server_thread;
 
@@ -244,7 +260,7 @@ void *accept_clients(void *args)
 {
 	struct timeval tv;
 	fd_set readfds;
-	
+	int cmdLength =0;
 	// use listen port from cmd line args if supplied, otherwise use default value
 	const char* listenPort = (char *)args;
 
@@ -254,6 +270,7 @@ void *accept_clients(void *args)
 
 	printf("\nWaiting for connection on %s...\n", listenPort);
 	while (1) {
+		char* b64Ch_ptr = NULL;
 		// Accept a client socket
 		conn_t* clientconn = accept_tcp(listenconn);
 		if (!clientconn)
@@ -270,7 +287,8 @@ void *accept_clients(void *args)
 		while (1) {
 			int outB64 = 0;
 			int sizer = 0;
-			char** b64Ch[64];
+			uint8_t ** b64Ch[1];
+			uint8_t ** buf[1];
 			//memset(recvBuf,0,sizeof recvBuf);
 			tv.tv_sec = 10;
 			tv.tv_usec = 10000; //10ms
@@ -292,40 +310,81 @@ void *accept_clients(void *args)
 				printf("%s\n", recvBuf);
 				if(strstr(recvBuf,"GetFile GET") != NULL)
 				{
-					//int getFileForBuffer(char* path,char* filename, uint8_t ** ppBuffer, int * cbBuffer){
-					
+					printf("%s\n", "Got here A");
 					int testElems = 0;
 					char testPath[1024];
 					char** testStrSplit = str_split(recvBuf,' ',&testElems);
-					if(testElems ==3)
+					printf("element count %d\n", testElems);
+					// char* testStrSplit[5];// = str_split(recvBuf,' ',&testElems);
+					// char* s;
+					// s = strtok (recvBuf ," ");
+					// while (s != NULL)
+					// {
+					// 	testStrSplit[testElems] = malloc(1024);
+					// 	strcpy(testStrSplit[testElems],s);
+					// 	s = strtok (NULL, " ");
+					// 	testElems++;
+					// }
+					printf("%s\n", "Got here B");
+					if(testElems >=3)
 					{
 						printf("Getting file %s\n", testStrSplit[2]);
 						sizer = getFileSize(".",testStrSplit[2]);
 						printf("Size was %d\n", sizer);
-						uint8_t buf[sizer];
+						
 						//memset(buf,0,sizer); 
 						
-						getFileForBuffer(".",testStrSplit[2],&buf,sizer, false);
-						//printf("Got %d with pointer %p\n", testOut, buf);
+						getFileForBuffer(".",testStrSplit[2],&buf,sizer);
+						printf("Got %d with pointer %p\n", sizer, &buf);
+						uint8_t * tempBuf = *buf;
+						for (int z = 0; z < sizer; z++)
+						{
+						    printf("%02X", tempBuf[z]);
+						}
 						if(sizer > 0)
 						{
-							//b64Ch = 
-							
 							base64_encode(buf,&b64Ch, sizer,&outB64);
-							char* newPath = (char*)malloc(outB64+40);
-							snprintf(newPath,outB64+40,"GetFile OK %s %d %s",testStrSplit[2],
-								outB64,*b64Ch);
-							//printf("Sending %s\n", newPath);
-							*b64Ch = newPath;
+							b64Ch_ptr = *b64Ch;
+							// printf("Here is the message:\n");
+							// for (int x = 0; x < outB64; x++)
+						 //    {
+						 //        printf("%02X", b64Ch_ptr[x]);
+						 //    }
+							int realSize = (outB64);
+							char *newPath = (char*)calloc(realSize,sizeof(char*));
+							char *newPathCmd = (char*)calloc(100,1);
+							memset(newPath,0,100);
+							memset(newPathCmd,0,realSize*sizeof(char*));
+							snprintf(newPathCmd,100,"GetFile OK %s %d ",testStrSplit[2],
+								outB64);
+							cmdLength = strlen(newPathCmd);
+							printf("Sending cmdLength %d\n", cmdLength);
+							snprintf(newPath,outB64+cmdLength,"%s%s",newPathCmd,
+								b64Ch_ptr);
+							printf("Sending outB64+cmdLength %d\n", outB64+cmdLength);
+							b64Ch_ptr = newPath;
+							printf("freeing buf\n");
+							//free(*buf);
+							printf("freed buf\n");
 						}
 						else
 						{
-							snprintf(testPath,sizeof testPath,"GetFile FILE_NOT_FOUND %s 0 \0",
+							snprintf(testPath,sizeof testPath,"GetFile FILE_NOT_FOUND %s 0",
 								testStrSplit[2]);
-							*b64Ch = testPath;
+							b64Ch_ptr = testPath;
 							outB64 = 1;
 							//printf("Sending %s\n", testPath);
 						}
+
+					}
+					if(testStrSplit)
+					{
+						printf("freeing string\n");
+						for(int q =0;q<testElems;q++)
+						{
+							free(testStrSplit[q]);
+						}
+						free(testStrSplit);
 					}
 					
 				}
@@ -335,11 +394,30 @@ void *accept_clients(void *args)
 			// send data
 			if(outB64 > 0 && b64Ch != NULL)
 			{
-				int retVal = sendData(clientconn, b64Ch, outB64+40);
-				printf("Sending %d bytes\n", outB64+40);
+				char sBuf[4096];
+				int retVal = 0;
+				for(int x=0;x<outB64+cmdLength;x+=4096)
+				{
+					memset(sBuf,0,sizeof(sBuf));
+					int sendLeft = (outB64+cmdLength)-x;
+					if( sendLeft<=4096)
+					{
+						memcpy(sBuf,&(b64Ch_ptr[x]),sendLeft);
+						printf("Sending %d: %s\n",sendLeft, sBuf);
+						retVal = sendData(clientconn, sBuf, sendLeft);
+
+						break;
+					}
+					memcpy(sBuf,&(b64Ch_ptr[x]),sizeof(sBuf));
+					printf("Sending %d: %s\n",sizeof(sBuf), sBuf);
+					retVal = sendData(clientconn, sBuf, sizeof(sBuf));
+				}
+				
+				printf("Sending %d bytes\n", outB64+cmdLength);
+				//retVal = sendData(clientconn, '\0', 1);
 				if(outB64 > 1)
 				{
-					free(b64Ch);
+					//free(b64Ch_ptr);
 				}
 				if (retVal <= 0)
 					break;
