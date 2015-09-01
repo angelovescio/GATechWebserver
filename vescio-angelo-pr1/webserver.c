@@ -124,11 +124,13 @@ int getFileForBuffer(char* path,char* filename, uint8_t ** ppBuffer, int cbBuffe
 	
 	strncat(cw,filename,511);
 	printf("%s %s\n", "Got here 1",cw);
-	if(*ppBuffer != NULL)
-	{
-		free(*ppBuffer);
-	}
-	*ppBuffer = calloc(cbBuffer,sizeof(uint8_t *));
+	// if(*ppBuffer != NULL)
+	// {
+	// 	printf("%s\n", "[Info] webserver:getFileForBuffer Freeing ppBuffer");
+	// 	free(*ppBuffer);
+	// }
+	// printf("%s %d\n", "[Info] webserver:getFileForBuffer Freeing ppBuffer with size", cbBuffer);
+	// *ppBuffer = calloc(cbBuffer,sizeof(uint8_t));
 	printf("%s\n", "Got here 2");
     uint8_t* data = *ppBuffer;
 	FILE *file;
@@ -154,10 +156,11 @@ int getFileForBuffer(char* path,char* filename, uint8_t ** ppBuffer, int cbBuffe
 	printf("%s\n", "Got here 6");
 	
 	fclose(file);
-	for (int i = 0; i < cbBuffer; i++)
+	for (int i = 0; i < cbBuffer && i < 20; i++)
 	{
 	    printf("%02X", data[i]);
 	}
+	printf("\n");
 	printf("%s\n", "returning from getFileForBuffer");
 	return 0;
 }
@@ -267,7 +270,22 @@ void *accept_clients(void *args)
 	conn_t* listenconn = listen_tcp(listenPort);
 	if (!listenconn)
 		return -1;
-
+	struct stat s;
+	int err = stat("data", &s);
+	if(-1 == err) {
+	    if(ENOENT == errno) {
+	        mkdir("data",0777);
+	    } else {
+	        perror("webserver::accept_clients::stat");
+	        exit(1);
+	    }
+	} else {
+	    if(S_ISDIR(s.st_mode)) {
+	        /* it's a dir */
+	    } else {
+	        /* exists but is no dir */
+	    }
+	}
 	printf("\nWaiting for connection on %s...\n", listenPort);
 	while (1) {
 		char* b64Ch_ptr = NULL;
@@ -287,8 +305,8 @@ void *accept_clients(void *args)
 		while (1) {
 			int outB64 = 0;
 			int sizer = 0;
-			uint8_t ** b64Ch[1];
-			uint8_t ** buf[1];
+			uint8_t * b64Ch = NULL;
+			uint8_t * buf = NULL;
 			//memset(recvBuf,0,sizeof recvBuf);
 			tv.tv_sec = 10;
 			tv.tv_usec = 10000; //10ms
@@ -315,16 +333,6 @@ void *accept_clients(void *args)
 					char testPath[1024];
 					char** testStrSplit = str_split(recvBuf,' ',&testElems);
 					printf("element count %d\n", testElems);
-					// char* testStrSplit[5];// = str_split(recvBuf,' ',&testElems);
-					// char* s;
-					// s = strtok (recvBuf ," ");
-					// while (s != NULL)
-					// {
-					// 	testStrSplit[testElems] = malloc(1024);
-					// 	strcpy(testStrSplit[testElems],s);
-					// 	s = strtok (NULL, " ");
-					// 	testElems++;
-					// }
 					printf("%s\n", "Got here B");
 					if(testElems >=3)
 					{
@@ -333,29 +341,47 @@ void *accept_clients(void *args)
 						printf("Size was %d\n", sizer);
 						
 						//memset(buf,0,sizer); 
-						
+						buf = calloc(sizer,sizeof(uint8_t));
 						getFileForBuffer(".",testStrSplit[2],&buf,sizer);
 						printf("Got %d with pointer %p\n", sizer, &buf);
-						uint8_t * tempBuf = *buf;
-						for (int z = 0; z < sizer; z++)
+						uint8_t * tempBuf = buf;
+						for (int z = 0; z < sizer && z < 20; z++)
 						{
 						    printf("%02X", tempBuf[z]);
 						}
+						printf("\n");
 						printf("[Info] Webserver::accept_clients::while::test_elems\n");
 						if(sizer > 0)
 						{
-							printf("[Info] Webserver::accept_clients::while::test_elems::0\n");
-							base64_decode(buf,&b64Ch, sizer,&outB64);
+							printf("[Info] Webserver::accept_clients::while::test_elems::0\n"); 
+							/*
+							int base64_decode(	const char *data,
+    											uint8_t ** decoded_data_ptr,
+                             					size_t input_length,
+                             					size_t *output_length)
+
+                            int base64_encode(	const unsigned char *data,
+												char ** encoded_data_ptr,
+												int input_length,
+												int *output_length)
+
+							*/
+							int b64sizeCalc = 4 * ((sizer+ 2) / 3);
+							b64Ch = (uint8_t*)calloc(b64sizeCalc,sizeof(uint8_t));
+							printf("[Info] Webserver::accept_clients::base64_encode(%p,%p,%d,%d)\n",
+								buf,b64Ch, sizer,outB64); 
+							base64_encode(buf,&b64Ch, sizer,&outB64);
+							printf("[Info] Webserver::accept_clients Allocing %d for outB64\n",outB64);
 							printf("[Info] Webserver::accept_clients::while::test_elems::1\n");
-							b64Ch_ptr = *b64Ch;
+							b64Ch_ptr = b64Ch;
 							printf("Here is the message:\n");
-							for (int x = 0; x < outB64; x++)
+							for (int x = 0; x && outB64 && x < 20; x++)
 						    {
 						        printf("%02X", b64Ch_ptr[x]);
 						    }
 							int realSize = (outB64);
+							printf("[Info] Webserver::accept_clients Allocing %d for decoded buf\n",realSize);
 							char *newPath = (char*)calloc(realSize,sizeof(char*));
-							printf("[Info] Webserver::accept_clients::while::test_elems::2\n");
 							char *newPathCmd = (char*)calloc(100,1);
 							printf("[Info] Webserver::accept_clients::while::test_elems::3\n");
 							memset(newPath,0,100);
@@ -370,10 +396,10 @@ void *accept_clients(void *args)
 								b64Ch_ptr);
 							printf("[Info] Webserver::accept_clients::while::test_elems::6\n");
 							printf("Sending outB64+cmdLength %d\n", outB64+cmdLength);
-							b64Ch_ptr = newPath;
-							printf("freeing buf\n");
-							//free(*buf);
-							printf("freed buf\n");
+							printf("%s\n", "Freeing newPath");
+							free(newPath);
+							printf("%s\n", "Freeing newPathCmd");
+							free(newPathCmd);
 						}
 						else
 						{
@@ -383,6 +409,16 @@ void *accept_clients(void *args)
 							b64Ch_ptr = testPath;
 							outB64 = 1;
 							//printf("Sending %s\n", testPath);
+						}
+						if(buf != NULL)
+						{
+							free(buf);
+							buf = NULL;
+						}
+						if(b64Ch != NULL)
+						{
+							free(b64Ch);
+							b64Ch = NULL;
 						}
 
 					}
@@ -433,6 +469,8 @@ void *accept_clients(void *args)
 				printf("Sent %d bytes\n", retVal);
 				stats_reportBytesSent(stats, retVal); //report bytes sent for stats
 			}
+			
+
 		}
 		//print final stats before exiting and reset stats for next connection
 		stats_finalize(stats);
