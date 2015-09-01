@@ -341,26 +341,34 @@ void *accept_clients(void *args)
 						{
 						    printf("%02X", tempBuf[z]);
 						}
+						printf("[Info] Webserver::accept_clients::while::test_elems\n");
 						if(sizer > 0)
 						{
-							base64_encode(buf,&b64Ch, sizer,&outB64);
+							printf("[Info] Webserver::accept_clients::while::test_elems::0\n");
+							base64_decode(buf,&b64Ch, sizer,&outB64);
+							printf("[Info] Webserver::accept_clients::while::test_elems::1\n");
 							b64Ch_ptr = *b64Ch;
-							// printf("Here is the message:\n");
-							// for (int x = 0; x < outB64; x++)
-						 //    {
-						 //        printf("%02X", b64Ch_ptr[x]);
-						 //    }
+							printf("Here is the message:\n");
+							for (int x = 0; x < outB64; x++)
+						    {
+						        printf("%02X", b64Ch_ptr[x]);
+						    }
 							int realSize = (outB64);
 							char *newPath = (char*)calloc(realSize,sizeof(char*));
+							printf("[Info] Webserver::accept_clients::while::test_elems::2\n");
 							char *newPathCmd = (char*)calloc(100,1);
+							printf("[Info] Webserver::accept_clients::while::test_elems::3\n");
 							memset(newPath,0,100);
 							memset(newPathCmd,0,realSize*sizeof(char*));
+							printf("[Info] Webserver::accept_clients::while::test_elems::4\n");
 							snprintf(newPathCmd,100,"GetFile OK %s %d ",testStrSplit[2],
 								outB64);
+							printf("[Info] Webserver::accept_clients::while::test_elems::5\n");
 							cmdLength = strlen(newPathCmd);
 							printf("Sending cmdLength %d\n", cmdLength);
 							snprintf(newPath,outB64+cmdLength,"%s%s",newPathCmd,
 								b64Ch_ptr);
+							printf("[Info] Webserver::accept_clients::while::test_elems::6\n");
 							printf("Sending outB64+cmdLength %d\n", outB64+cmdLength);
 							b64Ch_ptr = newPath;
 							printf("freeing buf\n");
@@ -369,6 +377,7 @@ void *accept_clients(void *args)
 						}
 						else
 						{
+							printf("[Info] Webserver::accept_clients::while::test_elems::else\n");
 							snprintf(testPath,sizeof testPath,"GetFile FILE_NOT_FOUND %s 0",
 								testStrSplit[2]);
 							b64Ch_ptr = testPath;
