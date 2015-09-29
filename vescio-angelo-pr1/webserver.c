@@ -86,9 +86,6 @@ printf("%s\n", "Got here 4");
 				break;
 			}
 			printf("%s\n", "Got here 9");
-			
-			
-			printf("%s\n", "Got here 10");
 		}
 		printf("%s\n", "Got here 11");	
 		assert(idx == count - 1);
@@ -121,7 +118,7 @@ int getFileForBuffer(char* path,char* filename, uint8_t ** ppBuffer, int cbBuffe
 	char cw[1024];
 	memset(cw,0,1024);
 	getcwd(cw,1024);
-	
+
 	strncat(cw,filename,511);
 	printf("%s %s\n", "Got here 1",cw);
 	// if(*ppBuffer != NULL)
@@ -132,18 +129,19 @@ int getFileForBuffer(char* path,char* filename, uint8_t ** ppBuffer, int cbBuffe
 	// printf("%s %d\n", "[Info] webserver:getFileForBuffer Freeing ppBuffer with size", cbBuffer);
 	// *ppBuffer = calloc(cbBuffer,sizeof(uint8_t));
 	printf("%s\n", "Got here 2");
-    uint8_t* data = *ppBuffer;
+    	uint8_t* data = *ppBuffer;
 	FILE *file;
 
 //Open file
 	file = fopen(cw, "rb");
-	
+
 	if (!file)
 	{
 		perror("Open file");
 		return EXIT_FAILURE;
 	}
-	if (!data)
+	printf("ppBuffer is %p\n",ppBuffer);
+	if (data == NULL)
 	{
 		fprintf(stderr, "Memory error!");
 		fclose(file);
@@ -152,9 +150,10 @@ int getFileForBuffer(char* path,char* filename, uint8_t ** ppBuffer, int cbBuffe
 
 //Read file contents into buffer
 	printf("%s\n", "Got here 5");
+//	fread(data, 1, cbBuffer, file);
 	fread(data, 1, cbBuffer, file);
 	printf("%s\n", "Got here 6");
-	
+
 	fclose(file);
 	for (int i = 0; i < cbBuffer && i < 20; i++)
 	{
@@ -166,8 +165,6 @@ int getFileForBuffer(char* path,char* filename, uint8_t ** ppBuffer, int cbBuffe
 }
 int main(int argc, char *argv[])
 {
-	
-	
 	int nHostPort = 8888;
 	int numThreads = 1;
 	char* filePath = ".";
@@ -305,8 +302,8 @@ void *accept_clients(void *args)
 		while (1) {
 			int outB64 = 0;
 			int sizer = 0;
-			uint8_t * b64Ch = NULL;
 			uint8_t * buf = NULL;
+			uint8_t * b64Ch = NULL;
 			//memset(recvBuf,0,sizeof recvBuf);
 			tv.tv_sec = 10;
 			tv.tv_usec = 10000; //10ms
@@ -328,67 +325,66 @@ void *accept_clients(void *args)
 				printf("%s\n", recvBuf);
 				if(strstr(recvBuf,"GetFile GET") != NULL)
 				{
-					printf("%s\n", "Got here A");
 					int testElems = 0;
 					char testPath[1024];
 					char** testStrSplit = str_split(recvBuf,' ',&testElems);
-					printf("element count %d\n", testElems);
-					printf("%s\n", "Got here B");
 					if(testElems >=3)
 					{
-						printf("Getting file %s\n", testStrSplit[2]);
 						sizer = getFileSize(".",testStrSplit[2]);
-						printf("Size was %d\n", sizer);
-						
-						//memset(buf,0,sizer); 
-						buf = calloc(sizer,sizeof(uint8_t));
+						buf = malloc(sizer);
+						memset(buf,0,sizer);
+						printf("$buf[0] going into getFileforBuffer is %p\n",&buf);
 						getFileForBuffer(".",testStrSplit[2],&buf,sizer);
 						printf("Got %d with pointer %p\n", sizer, &buf);
+						//At this point we received the request, and fave the file in a buffer
 						uint8_t * tempBuf = buf;
 						for (int z = 0; z < sizer && z < 20; z++)
 						{
 						    printf("%02X", tempBuf[z]);
 						}
 						printf("\n");
-						printf("[Info] Webserver::accept_clients::while::test_elems\n");
 						if(sizer > 0)
 						{
 							printf("[Info] Webserver::accept_clients::while::test_elems::0\n"); 
 							/*
-							int base64_decode(	const char *data,
-    											uint8_t ** decoded_data_ptr,
+							int base64_decode(
+								const char *data,
+    								uint8_t ** decoded_data_ptr,
                              					size_t input_length,
                              					size_t *output_length)
 
-                            int base64_encode(	const unsigned char *data,
-												char ** encoded_data_ptr,
-												int input_length,
-												int *output_length)
+				                        int base64_encode(
+								const unsigned char *data,
+								char ** encoded_data_ptr,
+								int input_length,
+								int *output_length)
 
 							*/
 							int b64sizeCalc = 4 * ((sizer+ 2) / 3);
-							b64Ch = (uint8_t*)calloc(b64sizeCalc,sizeof(uint8_t));
-							printf("[Info] Webserver::accept_clients::base64_encode(%p,%p,%d,%d)\n",
-								buf,b64Ch, sizer,outB64); 
+							b64Ch = malloc(b64sizeCalc);
+							//printf("[Info] Webserver::accept_clients::base64_encode(%p,%p,%d,%d)\n",
+							//	&buf,&b64Ch, sizer,outB64);
 							base64_encode(buf,&b64Ch, sizer,&outB64);
 							printf("[Info] Webserver::accept_clients Allocing %d for outB64\n",outB64);
 							printf("[Info] Webserver::accept_clients::while::test_elems::1\n");
-							b64Ch_ptr = b64Ch;
 							printf("Here is the message:\n");
-							for (int x = 0; x && outB64 && x < 20; x++)
-						    {
-						        printf("%02X", b64Ch_ptr[x]);
-						    }
+							for (int x = 0; x < outB64 && x < 100; x++)
+						    	{
+						        	printf("%c", b64Ch[x]);
+						    	}
+							printf("\n");
 							int realSize = (outB64);
 							printf("[Info] Webserver::accept_clients Allocing %d for decoded buf\n",realSize);
-							char *newPath = (char*)calloc(realSize,sizeof(char*));
-							char *newPathCmd = (char*)calloc(100,1);
-							printf("[Info] Webserver::accept_clients::while::test_elems::3\n");
-							memset(newPath,0,100);
-							memset(newPathCmd,0,realSize*sizeof(char*));
+							char newPath[realSize];
+							char newPathCmd[100];
+							printf("[Info] Webserver::accept_clients::while::test_elems::3 with newPath size %d and %d\n",realSize,sizeof newPath);
+							memset(newPathCmd,0,100);
+
+//							memcpy(newPath,0,sizeof(newPath)-1);
 							printf("[Info] Webserver::accept_clients::while::test_elems::4\n");
 							snprintf(newPathCmd,100,"GetFile OK %s %d ",testStrSplit[2],
 								outB64);
+							printf("[Info] %s\n",newPathCmd);
 							printf("[Info] Webserver::accept_clients::while::test_elems::5\n");
 							cmdLength = strlen(newPathCmd);
 							printf("Sending cmdLength %d\n", cmdLength);
@@ -397,9 +393,9 @@ void *accept_clients(void *args)
 							printf("[Info] Webserver::accept_clients::while::test_elems::6\n");
 							printf("Sending outB64+cmdLength %d\n", outB64+cmdLength);
 							printf("%s\n", "Freeing newPath");
-							free(newPath);
-							printf("%s\n", "Freeing newPathCmd");
-							free(newPathCmd);
+							//free(newPath);
+							printf("%s\n", "Freeing newPathCmd burp");
+							//free(newPathCmd);
 						}
 						else
 						{
@@ -412,13 +408,15 @@ void *accept_clients(void *args)
 						}
 						if(buf != NULL)
 						{
-							free(buf);
-							buf = NULL;
+							printf("freeing buf post reading file\n");
+//							free(buf);
+							//buf = NULL;
 						}
 						if(b64Ch != NULL)
 						{
-							free(b64Ch);
-							b64Ch = NULL;
+							printf("freeing b64ch post reading file\n");
+							//free(b64Ch);
+							//b64Ch = NULL;
 						}
 
 					}
@@ -431,45 +429,63 @@ void *accept_clients(void *args)
 						}
 						free(testStrSplit);
 					}
-					
+					printf("just before reporting stats\n");
 				}
+				printf("reporting stats\n");
 				stats_reportBytesRecd(stats, retVal); //report bytes received for stats   
 			}
 			//snprintf(sendBuf,sizeof sendBuf, "Hello client %d\n",time(NULL));
 			// send data
+			printf("[INFO] before data send\n");
 			if(outB64 > 0 && b64Ch != NULL)
 			{
 				char sBuf[4096];
 				int retVal = 0;
 				for(int x=0;x<outB64+cmdLength;x+=4096)
 				{
+					printf("[INFO] Entering outb64 for loop\n");
 					memset(sBuf,0,sizeof(sBuf));
 					int sendLeft = (outB64+cmdLength)-x;
+					for (int r = 0; r < outB64 && r < 100; r++)
+				    	{
+				        	printf("%c", b64Ch[r]);
+				    	}
+					printf("\n");
 					if( sendLeft<=4096)
 					{
-						memcpy(sBuf,&(b64Ch_ptr[x]),sendLeft);
-						printf("Sending %d: %s\n",sendLeft, sBuf);
+						printf("[INFO] Send left < 4096\n");
+						memcpy(sBuf,&(b64Ch[x]),sendLeft);
+						printf("Sending %d: ",sendLeft);
+						for (int q = 0; q < sendLeft && q < 100; q++)
+						{
+							printf("%c", sBuf[q]);
+						}
+						printf("\n");
 						retVal = sendData(clientconn, sBuf, sendLeft);
 
 						break;
 					}
-					memcpy(sBuf,&(b64Ch_ptr[x]),sizeof(sBuf));
-					printf("Sending %d: %s\n",sizeof(sBuf), sBuf);
+					memcpy(sBuf,&(b64Ch[x]),sizeof(sBuf));
+					printf("Sending %d: ",sizeof(sBuf));
+					for (int q = 0; q < outB64 && q < 100; q++)
+				    	{
+				        	printf("%c", sBuf[q]);
+				    	}
+					printf("\n");
 					retVal = sendData(clientconn, sBuf, sizeof(sBuf));
 				}
-				
 				printf("Sending %d bytes\n", outB64+cmdLength);
 				//retVal = sendData(clientconn, '\0', 1);
 				if(outB64 > 1)
 				{
-					//free(b64Ch_ptr);
+					printf("[INFO] Freeing b64Ch\n");
+					free(b64Ch);
 				}
 				if (retVal <= 0)
 					break;
 				printf("Sent %d bytes\n", retVal);
 				stats_reportBytesSent(stats, retVal); //report bytes sent for stats
 			}
-			
 
 		}
 		//print final stats before exiting and reset stats for next connection
