@@ -94,9 +94,8 @@ int main(int argc, char *argv[])
 {
 	int sockfd = 0, n = 0;
 	char recvBuff[1024];
-	struct sockaddr_in serv_addr; 
+	struct sockaddr_in serv_addr;
 
-	//char* host;//[64] = "0.0.0.0";
 	char host[64] = "0.0.0.0";
 	memset(workPath,0,sizeof(workPath));
 	strcpy(workPath,"workload.txt");
@@ -233,14 +232,7 @@ int main(int argc, char *argv[])
 		tv.tv_usec = 10000; // 10ms
 		FD_ZERO(&readfds);
 		FD_SET(serverconn->sockfd, &readfds);
-		// if (setsockopt (serverconn->sockfd, SOL_SOCKET, SO_RCVTIMEO, (char *)&tv,
-  //               sizeof(tv)) < 0)
-	 //        error("setsockopt failed\n");
 
-	    // if (setsockopt (serverconn->sockfd, SOL_SOCKET, SO_SNDTIMEO, (char *)&tv,
-	    //             sizeof(tv)) < 0)
-	    //     error("setsockopt failed\n");
-	
 		if (select(serverconn->sockfd + 1, &readfds, NULL, NULL, &tv) == -1) {
 			perror("select failed\n");
 			disconnect_tcp(serverconn);
@@ -252,7 +244,7 @@ int main(int argc, char *argv[])
 			printf("Working on segment %d\n", 2);
 			// recv data
 			int retVal = recvData(serverconn, (char*)recvBuf, 
-				(int)sizeof(recvBuf));
+				(int)sizeof(recvBuf),stats);
 			if (retVal <= 0)
 				break;
 			if(retVal>0)
@@ -260,67 +252,92 @@ int main(int argc, char *argv[])
 				int total= retVal;
 				printf("Working on segment %d\n", 3);
 				int outResp = 0;
-				char** splitResp = str_split(recvBuf,' ',&outResp);
-				if(outResp == 5)
+				char** splitResp = str_split(recvBuf,'\t',&outResp);
+				for (int q = 0; q < retVal && q < 20; q++)
+                                {
+                                	printf("%c", recvBuf[q]);
+                                }
+				printf("............");
+				for (int q = 0; q < retVal && q < 20; q++)
+                                {
+                                	printf("%c", recvBuf[retVal-q]);
+                                }
+                                printf("\n");
+				if(outResp == 3)
 				{
 					printf("Working on segment %d\n", 4);
 					printf("retVal was %d\n", retVal);
 					printf("split count was %d\n", outResp);
-					printf("data size was %d\n", atoi(splitResp[3]));
-					int dataSize = atoi(splitResp[3]);
-					int strCmdSize = retVal - strlen(splitResp[4]);
-					resizeBuffer = (uint8_t*)malloc(dataSize);
-					memset(resizeBuffer,0,dataSize);
-					memcpy(resizeBuffer,splitResp[4],strlen(splitResp[4]));
-					int writeAmount = strlen(splitResp[4]);
-					//printf("data was %s\n", splitResp[4]);
-					//status should be "GetFile STATUS filesize file"
-					if(retVal == 4096)
+					printf("data size was %d\n", atoi(splitResp[2]));
+					int writeAmount = atoi(splitResp[2]);
+					char rBuf[4096];
+					memset(rBuf,0,sizeof(rBuf));
+					if(writeAmount < 4096)
 					{
-//start
-						char rBuf[4096];
-						for(int x=writeAmount;x<dataSize;x+=4096)
+						retVal = writeAmount;
+					}
+					else
+					{
+						retVal = 4096;
+					}
+					retVal = recvData(serverconn, rBuf, retVal, stats);
+					if(retVal <= 4096)
+					{
+						for(int x=0;x<writeAmount;x+=retVal)
 						{
-							memset(rBuf,0,sizeof(rBuf));
-							int recvLeft = dataSize-x;
+							int recvLeft = writeAmount-x;
+							printf("recvLeft=%d writeAmount=%d x=%d\n",recvLeft,writeAmount,x);
 							if( recvLeft<=4096)
 							{
-								memcpy(rBuf,&(resizeBuffer[x]),recvLeft);
-								printf("Fetching %d: %s\n",recvLeft, rBuf);
-								retVal = recvData(serverconn, rBuf, recvLeft);
-
-								break;
+								//memcpy(rBuf,&(resizeBuffer[x]),recvLeft);
+								printf("Fetching %d: ",recvLeft);
+								for (int q = 0; q < retVal && q < 20; q++)
+                                				{
+                                					printf("%c", rBuf[q]);
+                                				}
+				      				printf("............");
+								for (int q = 0; q < retVal && q < 20; q++)
+                                				{
+				                                	printf("%c", rBuf[retVal-q]);
+                                				}
+								printf("\n");
+								retVal = recvData(serverconn, rBuf, recvLeft,stats);
+								if(retVal < 0)
+								{
+									break;
+								}
+								printf("Recv final %d bytes\n",retVal);
 							}
-							memcpy(rBuf,&(resizeBuffer[x]),sizeof(rBuf));
-							printf("Fetching %d: %s\n",sizeof(rBuf), rBuf);
-							retVal = recvData(serverconn, rBuf, sizeof(rBuf));
+							else
+							{
+								//memcpy(rBuf,&(resizeBuffer[x]),sizeof(rBuf));
+								printf("Fetching %d: ",sizeof(rBuf));
+								for (int q = 0; q < retVal && q < 20; q++)
+                                				{
+                                					printf("%c", rBuf[q]);
+                        			        	}
+								printf("............");
+								for (int q = 0; q < retVal && q < 20; q++)
+                                				{
+                        				        	printf("%c", rBuf[retVal-q]);
+				                                }
+
+				                                printf("\n");
+								retVal = recvData(serverconn, rBuf, sizeof(rBuf),stats);
+								if(retVal < 0)
+								{
+									break;
+								}
+								printf("Recv %d bytes\n",retVal);
+							}
 						}
-
-
-
-///end
-
-						// printf("%s\n", "Got here 7");
-						// resizeBuffer = (uint8_t*)malloc(dataSize);
-						// printf("Total datasize was %d\n", dataSize);
-						// memcpy(resizeBuffer,splitResp[4],strlen(splitResp[4]));
-						// while(retVal > 0)
-						// {
-						// 	memset(recvBuf,0,(int)sizeof(recvBuf));
-						// 	printf("before retVal was %d in loop\n", retVal);
-						// 	retVal = recvData(serverconn,  (char*)recvBuf, (int)sizeof(recvBuf));
-						// 	printf("after retVal was %d in loop\n", retVal);
-						// 	total +=retVal;
-						// 	strncat(resizeBuffer,recvBuf,(int)sizeof(recvBuf));
-						// }
-						printf("Total received was %d\n", total);
-						writeFileToDisk(splitResp[2],resizeBuffer,dataSize,downloadPath);
+						//writeFileToDisk(splitResp[2],resizeBuffer,dataSize,downloadPath);
 						printf("Got here 11 with retVal %d\n",retVal);
 					}
 					else
 					{
 						printf("Working on segment %d\n", 5);
-						writeFileToDisk(splitResp[2],splitResp[4],dataSize,downloadPath);
+						//writeFileToDisk(splitResp[2],splitResp[4],dataSize,downloadPath);
 					}
 				}
 			}
@@ -331,7 +348,7 @@ int main(int argc, char *argv[])
 		snprintf(sendBuf,sizeof sendBuf, "GetFile GET %s",splitStr[i]);
 		printf("%s\n", "sending data");
 		int retVal2 = sendData(serverconn, (char*)sendBuf, 
-			(int)sizeof(sendBuf));
+			(int)sizeof(sendBuf),stats);
 		if (retVal2 <= 0)
 			break;
 		printf("%s\n", "sent data");

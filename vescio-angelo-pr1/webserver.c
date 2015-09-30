@@ -233,17 +233,15 @@ int main(int argc, char *argv[])
            	perror("Unable to mask SIGPIPE");
            	exit(-1);
            }
-		if (pthread_create(&server_thread, NULL, accept_clients, port) < 0)
-	   	{
-	   		perror("Could not create server thread");
-	   		exit(-1);
-	   	}
-
-	   	pthread_join(server_thread, NULL);
-
-	   	pthread_exit(NULL);
-	   return EXIT_SUCCESS;
+	if (pthread_create(&server_thread, NULL, accept_clients, port) < 0)
+	{
+		perror("Could not create server thread");
+		exit(-1);
 	}
+	pthread_join(server_thread, NULL);
+	pthread_exit(NULL);
+	return EXIT_SUCCESS;
+}
 
 /* This is the function that is run by the "server thread".
    The socket code is similar to oneshot-single.c, except that we will
@@ -299,7 +297,7 @@ void *accept_clients(void *args)
 		unsigned char sendCounter=0;
 		unsigned char recvBuf[2000];
 
-		while (1) {
+		//while(1) {
 			int outB64 = 0;
 			int sizer = 0;
 			uint8_t * buf = NULL;
@@ -319,7 +317,7 @@ void *accept_clients(void *args)
 
 			// recv data if available
 			if (FD_ISSET(clientconn->sockfd, &readfds)) {
-				int retVal = recvData(clientconn, (char*)recvBuf, (int)sizeof(recvBuf));
+				int retVal = recvData(clientconn, (char*)recvBuf, (int)sizeof(recvBuf),stats);
 				if (retVal <= 0)
 					break;
 				printf("%s\n", recvBuf);
@@ -368,11 +366,16 @@ void *accept_clients(void *args)
 							printf("[Info] Webserver::accept_clients Allocing %d for outB64\n",outB64);
 							printf("[Info] Webserver::accept_clients::while::test_elems::1\n");
 							printf("Here is the message:\n");
-							for (int x = 0; x < outB64 && x < 100; x++)
+							for (int x = 0; x < outB64 && x < 20; x++)
 						    	{
 						        	printf("%c", b64Ch[x]);
 						    	}
-							printf("\n");
+							printf("............");
+                                                        for (int q = 0; q < outB64 && q < 20; q++)
+                                                        {
+                                                        	printf("%c", b64Ch[outB64-q]);
+                                                        }
+                                                        printf("\n");							printf("\n");
 							int realSize = (outB64);
 							printf("[Info] Webserver::accept_clients Allocing %d for decoded buf\n",realSize);
 							char newPath[realSize];
@@ -441,41 +444,59 @@ void *accept_clients(void *args)
 			{
 				char sBuf[4096];
 				int retVal = 0;
-				for(int x=0;x<outB64+cmdLength;x+=4096)
+				memset(sBuf,0,4096);
+				snprintf(sBuf,4096,"GETFILE\tOK\t%d\r\n\r\n",outB64);
+				printf("GETFILE\tOK\t%d\r\n\r\n",outB64);	
+				retVal = sendData(clientconn, sBuf, strlen(sBuf),stats);
+				for(int x=0;x<outB64;x+=4096)
 				{
 					printf("[INFO] Entering outb64 for loop\n");
 					memset(sBuf,0,sizeof(sBuf));
-					int sendLeft = (outB64+cmdLength)-x;
-					for (int r = 0; r < outB64 && r < 100; r++)
-				    	{
-				        	printf("%c", b64Ch[r]);
-				    	}
-					printf("\n");
+					int sendLeft = outB64-x;
 					if( sendLeft<=4096)
 					{
 						printf("[INFO] Send left < 4096\n");
 						memcpy(sBuf,&(b64Ch[x]),sendLeft);
-						printf("Sending %d: ",sendLeft);
-						for (int q = 0; q < sendLeft && q < 100; q++)
+						printf("Sending %d x: %d\n",sendLeft,x);
+						for (int q = 0; q < sendLeft && q < 20; q++)
 						{
 							printf("%c", sBuf[q]);
 						}
+						printf("............");
+                                                for (int q = 0; q < sendLeft && q < 20; q++)
+                                                {
+                                                	printf("%c", sBuf[sendLeft-q]);
+                                                }
 						printf("\n");
-						retVal = sendData(clientconn, sBuf, sendLeft);
-
-						break;
+						retVal = sendData(clientconn, sBuf, sendLeft,stats);
 					}
-					memcpy(sBuf,&(b64Ch[x]),sizeof(sBuf));
-					printf("Sending %d: ",sizeof(sBuf));
-					for (int q = 0; q < outB64 && q < 100; q++)
-				    	{
-				        	printf("%c", sBuf[q]);
-				    	}
-					printf("\n");
-					retVal = sendData(clientconn, sBuf, sizeof(sBuf));
+					else
+					{
+						memcpy(sBuf,&(b64Ch[x]),sizeof(sBuf));
+						for (int q = 0; q < outB64 && q < 20 && q < sizeof(sBuf); q++)
+					    	{
+					        	printf("%c", sBuf[q]);
+					    	}
+						printf("............");
+	                                        for (int q = 0; q < outB64 && q < 20; q++)
+                                        	{
+        	                	              	printf("%c", sBuf[sizeof(sBuf)-q]);
+                        	                }
+						printf("\n");
+						if(sendLeft > 4096)
+						{
+							printf("Sending %d: x: %d\n",sizeof(sBuf),x);
+							retVal = sendData(clientconn, sBuf, sizeof(sBuf),stats);
+						}
+						else
+						{
+							printf("Sending %d: x: %d\n",sendLeft,x);
+							retVal = sendData(clientconn, sBuf, sendLeft, stats);
+						}
+					}
 				}
 				printf("Sending %d bytes\n", outB64+cmdLength);
-				//retVal = sendData(clientconn, '\0', 1);
+				retVal = sendData(clientconn, '\0', 1,stats);
 				if(outB64 > 1)
 				{
 					printf("[INFO] Freeing b64Ch\n");
@@ -487,7 +508,7 @@ void *accept_clients(void *args)
 				stats_reportBytesSent(stats, retVal); //report bytes sent for stats
 			}
 
-		}
+		//}
 		//print final stats before exiting and reset stats for next connection
 		stats_finalize(stats);
 

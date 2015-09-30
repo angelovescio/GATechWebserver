@@ -1,6 +1,6 @@
 #ifndef __CLIENTSERVER_H
 #define __CLIENTSERVER_H
-
+#include "stats.h"
 
 // a convenience struct that contains the socket and remote address for a connection
 typedef struct {
@@ -18,7 +18,7 @@ conn_t* listen_tcp(const char* listenPort);
 conn_t* accept_tcp(conn_t* listenconn);
 int recv_tcp(conn_t* connxn, char* buffer, unsigned int bufSize);
 int send_tcp(conn_t* connxn, char* buffer, unsigned int bytesToSend);
-int recvData(conn_t* connxn, char* buffer, unsigned int bufSize);
-int sendData(conn_t* connxn, char* buffer, unsigned int bytesToSend);
+int recvData(conn_t* connxn, char* buffer, unsigned int bufSize, connxnstats_t* stats);
+int sendData(conn_t* connxn, char* buffer, unsigned int bytesToSend, connxnstats_t* stats);
 
 #endif
