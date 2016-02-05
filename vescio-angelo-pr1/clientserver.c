@@ -5,7 +5,6 @@
 #include <unistd.h>
 #include <errno.h>
 #include <string.h>
-#include "stats.h"
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -178,7 +177,7 @@ int send_tcp(conn_t* connxn, char* buffer, unsigned int bytesToSend) {
 }
 
 // Convenience function: Receive data into a provided buffer on the given connection
-int recvData(conn_t* connxn, char* buffer, unsigned int bufSize,connxnstats_t* stats) {
+int recvData(conn_t* connxn, char* buffer, unsigned int bufSize, connxnstats_t* stats) {
 	int retVal = recv_tcp(connxn, (char*)buffer, bufSize);
 	if (retVal <= 0) {
 		disconnect_tcp(connxn);
@@ -187,11 +186,10 @@ int recvData(conn_t* connxn, char* buffer, unsigned int bufSize,connxnstats_t* s
 }
 
 // Convenience function: Send data in a provided buffer on the given connection
-int sendData(conn_t* connxn, char* buffer, unsigned int bytesToSend,connxnstats_t* stats) {
+int sendData(conn_t* connxn, char* buffer, unsigned int bytesToSend, connxnstats_t* stats) {
 	int retVal = send_tcp(connxn, (char*)buffer, bytesToSend);
 	if (retVal <= 0) {
 		disconnect_tcp(connxn);
 	}
-	stats_reportBytesSent(stats, retVal); //report bytes sent for stats
 	return retVal;
 }
